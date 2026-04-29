@@ -37,7 +37,7 @@ a **working AI compiler** that can compile and run neural networks.
 
 ## Prerequisites
 
-- **Python 3.9+** with basic proficiency
+- **Python 3.10+** with basic proficiency
 - **Basic ML knowledge** (what a neural network is, forward/backward pass)
 - **gcc/g++** for C/C++ chapters
 - No prior compiler knowledge needed!

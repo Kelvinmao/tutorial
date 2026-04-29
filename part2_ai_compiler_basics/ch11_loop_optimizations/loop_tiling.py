@@ -122,8 +122,10 @@ def demo():
     console.print(f"  Estimated cache misses (tiled):  {misses['tiled']:,}")
     console.print(f"  Reduction: {misses['naive'] / max(misses['tiled'], 1):.1f}x")
 
-    console.print("\n[dim]Key insight: tiling keeps data in L1/L2 cache between reuse,")
-    console.print("dramatically reducing the number of slow main memory accesses.[/]")
+    console.print(
+        "\n[dim]Key insight: tiling keeps data in L1/L2 cache between reuse,\n"
+        "dramatically reducing the number of slow main memory accesses.[/]"
+    )
 
     console.print("\n[bold green]✓ All results verified against NumPy.[/]")
 
