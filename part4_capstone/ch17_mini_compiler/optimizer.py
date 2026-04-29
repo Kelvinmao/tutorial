@@ -60,6 +60,12 @@ def eliminate_dead_nodes(graph: ModelGraph) -> int:
     for node in graph.nodes.values():
         for inp in node.inputs:
             used.add(inp)
+        # Fused nodes may keep extra dependencies in attrs rather than inputs.
+        # Keep those dependency nodes alive so codegen does not reference a
+        # deleted tensor such as a MatMul+Add fused bias.
+        bias = node.attrs.get("bias")
+        if isinstance(bias, str):
+            used.add(bias)
 
     # Find output node (last in topo order)
     topo = graph.topo_order()

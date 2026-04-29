@@ -21,7 +21,7 @@ from utils.visualization import plot_heatmap
 console = Console()
 
 
-def simulate_gpu_matmul(M: int, N: int, K: int,
+def simulate_gpu_matmul(A: np.ndarray, B: np.ndarray,
                         block_x: int = 4, block_y: int = 4):
     """
     Simulate GPU-style thread mapping for matrix multiply.
@@ -29,6 +29,11 @@ def simulate_gpu_matmul(M: int, N: int, K: int,
     Each thread computes one element C[row, col].
     Threads are organized into 2D blocks.
     """
+    M, K = A.shape
+    K2, N = B.shape
+    if K != K2:
+        raise ValueError(f"Shape mismatch: A is {A.shape}, B is {B.shape}")
+
     grid_x = (N + block_x - 1) // block_x
     grid_y = (M + block_y - 1) // block_y
 
@@ -40,8 +45,6 @@ def simulate_gpu_matmul(M: int, N: int, K: int,
     block_map = np.zeros((M, N), dtype=int)
     thread_map = np.zeros((M, N), dtype=int)
 
-    A = np.random.rand(M, K).astype(np.float32)
-    B = np.random.rand(K, N).astype(np.float32)
     C = np.zeros((M, N), dtype=np.float32)
 
     for by in range(grid_y):
@@ -67,14 +70,16 @@ def demo():
 
     M, N, K = 16, 16, 8
     block_x, block_y = 4, 4
+    rng = np.random.default_rng(42)
+    A = rng.random((M, K), dtype=np.float32)
+    B = rng.random((K, N), dtype=np.float32)
 
-    C, block_map, thread_map = simulate_gpu_matmul(
-        M, N, K, block_x, block_y
-    )
+    C, block_map, thread_map = simulate_gpu_matmul(A, B, block_x, block_y)
 
-    # Verify against numpy
-    A = np.random.rand(M, K).astype(np.float32)
+    # Verify against NumPy using the same inputs as the simulated mapping.
+    max_error = np.max(np.abs(C - (A @ B)))
     console.print(f"\n[bold]Output C shape:[/] {C.shape}")
+    console.print(f"[bold]Max error vs NumPy:[/] {max_error:.6f}")
 
     # Visualize block assignments
     console.print("\n[bold cyan]Block Assignment Map[/]")

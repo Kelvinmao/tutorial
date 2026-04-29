@@ -24,3 +24,29 @@ python calibration.py
 python mixed_precision.py
 python visualize_quantization.py
 ```
+
+## Key Idea
+
+Quantization replaces high-precision floating-point values with lower-precision
+integer values plus metadata such as scale and zero point. The compiler's job
+is not just to change dtypes; it must preserve numerical meaning across
+operators.
+
+Common decisions include:
+
+- **symmetric vs asymmetric** quantization,
+- **per-tensor vs per-channel** scales,
+- calibration data selection,
+- accumulation type, usually int32 for int8 matmul,
+- and where dequantize/requantize boundaries belong.
+
+The scripts in this chapter show the mechanics on small tensors. Real
+inference stacks also need operator coverage, accuracy validation, calibration
+pipelines, and target-specific kernels that are actually faster than FP32.
+
+## Common Failure Modes
+
+Quantization can fail silently when calibration data is unrepresentative,
+outliers dominate the scale, or mixed-precision choices introduce too much
+rounding error in sensitive layers. Always compare model accuracy, not just
+tensor-level reconstruction error.

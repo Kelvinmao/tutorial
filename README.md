@@ -86,8 +86,8 @@ ai-compiler-tutorial/
 │   └── ch16_custom_kernels/            # Hand-optimized C kernels
 │
 └── part4_capstone/                     # Putting it all together
-    ├── ch17_mini_ai_compiler/          # Full end-to-end AI compiler
-    ├── ch18_real_world_frameworks/     # TVM, XLA, Triton, ONNX Runtime
+    ├── ch17_mini_compiler/             # Full end-to-end AI compiler
+    ├── ch18_real_world/                # TVM, XLA, Triton, ONNX Runtime
     └── ch19_whats_next/                # Papers, books, communities
 ```
 
