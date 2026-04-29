@@ -24,12 +24,14 @@ Model Description (Python DSL)
 | `codegen.py` | Generate C code from optimized graph |
 | `compiler.py` | Main driver: model → executable |
 | `examples.py` | Example models (MLP, linear regression) |
+| `real_mlp_experiment.py` | Compile a deterministic MLP to native C and compare against NumPy |
 | `exercises.md` | Practice problems |
 
 ## Run
 ```bash
 python compiler.py       # compile and run example model
 python examples.py       # more model examples
+python real_mlp_experiment.py  # compare NumPy vs generated native C
 ```
 
 ## What This Compiler Really Does
@@ -45,3 +47,11 @@ The capstone intentionally stays small enough to read in one sitting:
 This is not yet a production compiler: it does not schedule tiled kernels,
 perform shape-polymorphic compilation, target GPUs, or import ONNX. Those are
 good follow-up exercises once the end-to-end path is clear.
+
+## Real Hardware Experiment
+
+`real_mlp_experiment.py` builds a tiny deterministic MLP, runs it in NumPy,
+emits standalone C with the same weights and input, compiles that C with the
+local system compiler, and checks the generated executable against the Python
+reference. This is the smallest complete version of a real compiler workflow:
+correctness first, then timing.
