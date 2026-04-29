@@ -1,0 +1,20 @@
+Program
+  LetDecl 'x': int
+    Int(2)
+  LetDecl 'y'
+    BinOp '+'
+      BinOp '*'
+        Id(x)
+        Int(3)
+      Int(1)
+  If
+    condition:
+      Compare '>'
+        Id(y)
+        Int(5)
+    then:
+      Print
+        Id(y)
+    else:
+      Print
+        Int(0)
