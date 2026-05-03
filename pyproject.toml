@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+markers = [
+    "exercise: student-implemented exercise (run with: pytest -m exercise)",
+]
