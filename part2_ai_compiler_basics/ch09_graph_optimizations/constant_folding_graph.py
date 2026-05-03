@@ -8,6 +8,46 @@ Usage:
     python constant_folding_graph.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Graph-Level Constant Folding (Partial Evaluation)
+#
+# Historical context: This extends scalar constant folding (ch06) to the
+# graph/tensor level. ONNX Runtime, TensorRT, and XLA all perform this.
+# The key insight: many tensors in a neural network graph are constants
+# (weights, batch-norm parameters). If all inputs to a node are constant,
+# the node's output is also a constant that can be pre-computed.
+#
+# Problem solved: BatchNorm parameters (gamma, beta, mean, variance)
+# are fixed after training. The formula:
+#   output = gamma * (input - mean) / sqrt(var + eps) + beta
+# contains subexpressions like gamma/sqrt(var+eps) that depend only on
+# constants. These can be folded into a single scale+offset at compile
+# time, reducing runtime computation.
+#
+# How it works:
+# 1. Mark all nodes with no inputs (Const, Input) as "constant" or not.
+# 2. Iterate: for each node, if ALL inputs are marked constant, mark
+#    this node as constant too (and annotate it as "folded").
+# 3. Repeat until no new nodes can be folded (fixpoint).
+# 4. In a real compiler, folded nodes would be evaluated and replaced
+#    with a single Const node holding the pre-computed result.
+#
+#   BatchNorm graph:               After constant folding:
+#
+#   gamma (Const) ┐                 scale (Const) ┐
+#   var   (Const) ┤─► Div ┐          (= gamma /     ├─► Mul ┐
+#   eps   (Const) ┘      ├─ Mul       sqrt(var+eps))  │       │
+#   input (░░░░░) ──────┘    │     input ──────────┘       ├─ output
+#   mean  (Const) ┐            ├─► Add  shift (Const) ────────┘
+#   beta  (Const) ┘            │     (= beta - mean*scale)
+#              Sub ─► offset ──┘
+#
+#   Before: 6 ops at runtime      After: 2 ops at runtime
+#   (Sub, Div, Mul, Add, ...)      (Mul, Add) + pre-computed consts
+#
+# This is the tensor analog of the scalar constant folding in ch06.
+# ═══════════════════════════════════════════════════════════════════════════
+
 import numpy as np
 from rich.console import Console
 from rich.table import Table

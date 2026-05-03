@@ -9,6 +9,58 @@ Usage:
     python loop_tiling.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Loop Tiling (Cache Blocking / Strip Mining)
+#
+# Historical context: Loop tiling was formalized by Wolfe (1989) and
+# Lam, Rothberg & Wolf (1991). It's the single most impactful loop
+# optimization for dense linear algebra. The ATLAS library (1998)
+# used auto-tuned tile sizes to match BLAS performance, and modern
+# AI compilers (TVM, Halide) use tiling as a primary scheduling knob.
+#
+# Problem solved: Naive matrix multiply (ijk loops) has terrible cache
+# behavior. When scanning column j of matrix B, each element is in a
+# different cache line, causing an L1 miss per element. For large N,
+# the working set far exceeds cache, so every access goes to main memory.
+#
+# How it works:
+# 1. Split each loop dimension into an OUTER tile loop and an INNER
+#    element loop:
+#      for i in range(0, M, tile):      # outer tile
+#        for j in range(0, N, tile):
+#          for k in range(0, K, tile):
+#            for ii in range(i, i+tile): # inner element
+#              for jj in range(j, j+tile):
+#                for kk in range(k, k+tile):
+#                  C[ii,jj] += A[ii,kk] * B[kk,jj]
+#
+#   Naive access pattern:          Tiled access pattern:
+#   (scanning B column-wise)        (B tile reused from cache)
+#
+#   B matrix:                       B matrix:
+#   ┌───────────────┐               ┌───────────────┐
+#   │ ↓ ↓ ↓ ↓ ↓ ↓ ↓ │               │████│           │
+#   │ ↓ ↓ ↓ ↓ ↓ ↓ ↓ │  every access   │████│           │  tile stays
+#   │ ↓ ↓ ↓ ↓ ↓ ↓ ↓ │  is a cache     │████│           │  in L1 cache
+#   │ ↓ ↓ ↓ ↓ ↓ ↓ ↓ │  miss!          │████│           │  for tile_A
+#   └───────────────┘               └───────────────┘  rows
+#
+#   Working set:                    Working set:
+#   ≈ M×N×K (entire B)              ≈ tile×tile×3 (fits in cache!)
+#
+# 2. The tile×tile submatrices of A, B, and C fit in L1/L2 cache.
+#    All arithmetic on a tile reuses data already in cache.
+#
+# 3. Cache miss analysis:
+#    - Naive: B accessed column-wise → ~M*N*K/8 L1 misses
+#    - Tiled: B tile accessed multiple times from cache → far fewer misses
+#    - Typical improvement: 5–10× for matrices > 64×64
+#
+# Choosing tile size: tile should make the working set (tile_A + tile_B +
+# tile_C = tile×K + K×tile + tile×tile) fit in L1 cache. For a 32KB L1
+# with 8-byte doubles, tile=32 uses 32*32*3*8 = 24KB → fits.
+# ═══════════════════════════════════════════════════════════════════════════
+
 import numpy as np
 import time
 from rich.console import Console

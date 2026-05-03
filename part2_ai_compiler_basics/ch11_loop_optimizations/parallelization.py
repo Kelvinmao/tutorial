@@ -6,6 +6,59 @@ Usage:
     python parallelization.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Loop Parallelization (Thread-Level Parallelism)
+#
+# Historical context: Automatic parallelization research began in the
+# 1980s with the Parafrase project (Kuck et al., UIUC). OpenMP (1997)
+# standardized pragmas for loop parallelization in C/Fortran. Modern
+# AI compilers parallelize across CPU cores, GPU threads, and even
+# distributed nodes.
+#
+# Problem solved: Modern CPUs have 4–64 cores, but a single-threaded
+# loop uses only one. Parallelization distributes independent loop
+# iterations across cores for near-linear speedup.
+#
+# How it works:
+# 1. Identify a parallelizable loop: one where iterations are
+#    independent (no cross-iteration dependencies). In matmul,
+#    each output row C[i,:] is independent of other rows.
+#
+# 2. Divide the iteration space into chunks, one per thread:
+#    Thread 0: rows [0, M/4)
+#    Thread 1: rows [M/4, M/2)
+#    Thread 2: rows [M/2, 3M/4)
+#    Thread 3: rows [3M/4, M)
+#
+#   Matrix C (output):        Thread work distribution:
+#
+#   ┌──────────────────┐     Core 0  Core 1  Core 2  Core 3
+#   │ rows 0..63       │      │       │       │       │
+#   ├──────────────────┤      │ 0..63 │       │       │
+#   │ rows 64..127     │      │       │64..127│       │
+#   ├──────────────────┤      │       │       │128..  │
+#   │ rows 128..191    │      │       │       │  191  │
+#   ├──────────────────┤      │       │       │       │192..255
+#   │ rows 192..255    │      │       │       │       │
+#   └──────────────────┘      ▼       ▼       ▼       ▼
+#                            ────── all work in parallel ──────
+#                                 ~4× speedup (linear)
+#
+# 3. Each thread computes its chunk using NumPy's vectorized matmul.
+#
+# 4. Synchronize: wait for all threads to finish (join).
+#
+# Key considerations:
+# - OUTER loop parallelism (rows) is best: large chunks, good locality.
+# - INNER loop parallelism (columns or k) requires synchronization.
+# - Python's GIL limits thread-level parallelism for pure Python, but
+#   NumPy releases the GIL during C-level computation.
+# - In compiled code (C/LLVM), OpenMP #pragma omp parallel for works.
+#
+# AI compiler integration: TVM annotates loop axes with "parallel"
+# to distribute work across CPU cores. On GPUs, this maps to blocks/threads.
+# ═══════════════════════════════════════════════════════════════════════════
+
 import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor

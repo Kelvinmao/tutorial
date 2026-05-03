@@ -9,6 +9,69 @@ Usage:
     python tensor_expression.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Tensor Expression DSL + Lowering to Loop Nests
+#
+# Historical context: Halide (2012, MIT) introduced the idea of separating
+# the *algorithm* (what to compute) from the *schedule* (how to compute
+# it — loop order, tiling, parallelism). TVM (2018, Chen et al.) brought
+# this to deep learning. The tensor expression DSL lets you write:
+#   C[i,j] = sum_k(A[i,k] * B[k,j])
+# and the compiler decides how to implement the loops, tiling, etc.
+#
+# Problem solved: Tensor operations like matmul are defined mathematically
+# as element-wise formulas with reductions. The compiler needs to lower
+# these to concrete loop nests that can run on hardware. The loop order,
+# nesting, and bounds must be correct.
+#
+# How it works:
+# 1. DEFINE: User writes a declarative computation using the DSL:
+#    - placeholder(shape, name) creates input tensor references
+#    - reduce_axis(extent, name) creates a reduction loop variable
+#    - compute(shape, lambda, name) defines the output formula
+#    - reduce_sum(expr, axis) marks an accumulation over a reduction axis
+#
+#    Example: C[i,j] = sum_k(A[i,k] * B[k,j])
+#      A = placeholder((M,K), "A")
+#      B = placeholder((K,N), "B")
+#      k = reduce_axis(K, "k")
+#      C = compute((M,N), lambda i,j: reduce_sum(A[i,k]*B[k,j], k), "C")
+#
+# 2. LOWER TO LOOPS (lower_to_loops):
+#    a) Create spatial loops for each output dimension (i, j).
+#    b) If there's a reduction (sum over k), add an initialization
+#       statement (C[i][j] = 0) and an inner reduction loop.
+#    c) The innermost body is an accumulation: C[i][j] += A[i][k] * B[k][j]
+#    d) Spatial loops wrap the reduction loops:
+#         for i:       (spatial)
+#           for j:     (spatial)
+#             C = 0    (init)
+#             for k:   (reduction)
+#               C += A*B
+#
+#   Tensor expression:                Loop nest (lowered):
+#
+#   C[i,j] = ∑ₖ A[i,k] * B[k,j]      for i in 0..M:        # spatial
+#                                       for j in 0..N:      # spatial
+#   ┌─────────────────────┐              C[i][j] = 0     # init
+#   │  Declarative       │              for k in 0..K:  # reduce
+#   │  "what to compute" │                C[i][j] += A[i][k] * B[k][j]
+#   └──────────┬──────────┘
+#              │ lower_to_loops()    ┌─────────────────────┐
+#              └─────────────►    │  Imperative          │
+#                                   │  "how to compute"    │
+#                                   └─────────────────────┘
+#
+#   This is the Halide/TVM separation of algorithm vs. schedule.
+#   The loop nest can then be tiled, unrolled, vectorized (ch11).
+#
+# 3. The resulting loop nest can then be transformed by ch11 optimizations
+#    (tiling, unrolling, vectorization, parallelization).
+#
+# This is the bridge between the high-level graph IR (ch08-09) and the
+# low-level loop IR that maps to hardware (ch11-13).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import numpy as np

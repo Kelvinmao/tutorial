@@ -8,6 +8,59 @@ Usage:
     python autodiff.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Reverse-Mode Automatic Differentiation (Backpropagation)
+#
+# Historical context: Backpropagation was independently discovered multiple
+# times — Linnainmaa (1970) described reverse accumulation, Werbos (1974)
+# applied it to neural networks, and Rumelhart, Hinton & Williams (1986)
+# popularized it. Every modern deep learning framework implements it.
+# The algorithm is simply the chain rule applied in reverse topological
+# order over a computation graph.
+#
+# Problem solved: Given a scalar loss L computed from parameters W through
+# a chain of operations, compute ∂L/∂W for every parameter W. This is
+# needed for gradient descent optimization of neural networks.
+#
+# Why reverse mode: For a function f: R^n → R (many inputs, one output),
+# reverse mode computes ALL n partial derivatives in one backward pass.
+# Forward mode would require n separate passes. Since neural networks
+# have millions of parameters but one scalar loss, reverse mode wins.
+#
+# How it works:
+# 1. Get nodes in topological order (inputs first, loss last).
+# 2. Set the loss gradient to 1.0 (∂L/∂L = 1).
+# 3. Walk nodes in REVERSE topological order (loss → inputs).
+# 4. For each node, call its backward_fn(grad_output) to compute
+#    the gradient of the loss w.r.t. each input:
+#    - MatMul backward: ∂L/∂A = grad @ Bᵀ, ∂L/∂B = Aᵀ @ grad
+#    - Add backward:    ∂L/∂A = grad, ∂L/∂B = grad
+#    - ReLU backward:   ∂L/∂X = grad * (X > 0)
+#    - MSE backward:    ∂L/∂pred = 2*(pred - target)/n
+# 5. ACCUMULATE gradients on each input tensor (not replace — a tensor
+#    may be used by multiple downstream ops).
+#
+#   Forward pass (left to right):        Backward pass (right to left):
+#
+#   x ──► MatMul ──► Add ──► ReLU ──► MSE ─► loss
+#   w ──┘         b ──┘                    │
+#                                          │ ∂L/∂L = 1.0
+#                                          ▼
+#   ∂L     ∂L        ∂L        ∂L        ∂L
+#   ── ── ── ──── ── ──── ── ──── ── ──── ──
+#   ∂x     ∂w        ∂b        ∂relu     ∂mse
+#    │      │         │         │          │
+#    ◄──────┼─MatMul──◄──Add───◄─ReLU────◄─MSE
+#          grad@Bᵀ   grad      grad*(x>0)  2(p-t)/n
+#
+#   Key: each backward_fn receives ∂L/∂output, returns ∂L/∂inputs.
+#   Gradients ACCUMULATE (+=) because one tensor may feed multiple ops.
+#
+# This implementation also includes numerical_gradient() for verification:
+# it computes ∂f/∂x[i] ≈ (f(x+ε) - f(x-ε)) / 2ε. If the autodiff
+# gradient matches the numerical gradient, the implementation is correct.
+# ═══════════════════════════════════════════════════════════════════════════
+
 import numpy as np
 import sys, os
 

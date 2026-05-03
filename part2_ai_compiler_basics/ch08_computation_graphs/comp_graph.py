@@ -8,6 +8,65 @@ Usage:
     python comp_graph.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Computation Graph Construction (Tensor-Level DAG IR)
+#
+# Historical context: Computation graphs became central to deep learning
+# with Theano (2010, Université de Montréal), which pioneered expressing
+# ML models as directed acyclic graphs (DAGs) of tensor operations.
+# TensorFlow (2015) and PyTorch (2017) both use this representation.
+# AI compilers (XLA, TVM, TensorRT) consume computation graphs as input.
+#
+# Problem solved: Neural networks are sequences of tensor operations
+# (matmul, add, relu, softmax). We need a data structure that:
+# 1. Records the operations and their data dependencies (DAG structure)
+# 2. Tracks tensor shapes for shape inference and memory planning
+# 3. Stores backward functions for automatic differentiation
+# 4. Supports graph-level optimizations (fusion, folding, scheduling)
+#
+# How it works:
+# - Each operation (MatMul, Add, ReLU, etc.) becomes a GraphNode.
+# - Each tensor flowing between operations becomes a Tensor object
+#   with data (numpy array), shape, gradient storage, and a pointer
+#   to the node that produced it.
+# - The CompGraph class provides an API for building the graph:
+#   graph.matmul(a, b) creates a MatMul node, computes the forward
+#   result, records a backward_fn (for autodiff), and returns the
+#   output Tensor.
+# - The graph is implicitly a DAG: each node's inputs are Tensors
+#   from earlier nodes.
+#
+#   Python code:                       Computation Graph (DAG):
+#
+#   x = input([1,784])                     x [1,784]
+#   w = const([784,128])                   │
+#   h = graph.matmul(x, w)         w───►┌──┴──┐
+#   b = const([1,128])                  │MatMul│───┐
+#   h = graph.add(h, b)                └──────┘    │ [1,128]
+#   h = graph.relu(h)           b───►┌──┴──┐      │
+#   loss = graph.mse(h, target)      │ Add  │─────┘
+#                                    └──────┘
+#                                    ┌──┴──┐
+#                                    │ ReLU │    [1,128]
+#                                    └──────┘
+#                            target─►┌─┴─┐
+#                                   │ MSE│     [1] (scalar loss)
+#                                   └────┘
+#
+#   Each edge carries a Tensor with shape, data, and grad storage.
+#   Each node stores backward_fn for reverse-mode autodiff (ch08).
+#
+# The backward_fn for each op encodes the chain-rule gradient:
+#   MatMul: ∂L/∂A = grad @ Bᵀ, ∂L/∂B = Aᵀ @ grad
+#   Add:    ∂L/∂A = grad, ∂L/∂B = grad (with broadcasting reduction)
+#   ReLU:   ∂L/∂X = grad * (X > 0)
+# These are used by the backward pass in autodiff.py.
+#
+# This is analogous to the IR in a traditional compiler (ch05), but at
+# a higher level of abstraction — operations are tensor ops rather than
+# scalar arithmetic.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import numpy as np

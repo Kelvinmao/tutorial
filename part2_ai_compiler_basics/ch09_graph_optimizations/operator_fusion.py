@@ -9,6 +9,62 @@ Usage:
     python operator_fusion.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Operator Fusion (Graph Rewriting)
+#
+# Historical context: Operator fusion was pioneered by XLA (2017, Google)
+# and TVM (2018, Chen et al.). The key observation: on modern hardware,
+# memory bandwidth is the bottleneck, not compute. A naive execution of
+# Conv → BN → ReLU writes the Conv output to memory, reads it for BN,
+# writes BN output, reads it for ReLU. Fusion merges them into a single
+# kernel that reads input once, computes all three ops, and writes once.
+#
+# Problem solved: Each GPU kernel launch and each memory round-trip is
+# expensive. A model with 100 ops might have 100 kernel launches and
+# 200 memory read/write cycles. Fusion reduces both dramatically.
+#
+# How it works (pattern-based graph rewriting):
+# 1. The graph is represented as a dict of OpNode objects connected
+#    by named edges (input references).
+#
+# 2. PATTERN: MatMul → Add (linear layer fusion):
+#    - Find an Add node whose input is a MatMul.
+#    - Check that the MatMul output is ONLY consumed by this Add
+#      (single-use check — if others read it, we can't fuse).
+#    - Merge: rename MatMul to "Linear", append bias input, redirect
+#      all consumers of Add to point to MatMul, remove Add.
+#
+#   Before fusion:                After fusion:
+#
+#   x ─►┌───────┐                  x ─►┌─────────────┐
+#   w ─►│MatMul │─┐               w ─►│Linear       │
+#       └───────┘ │               b ─►│(matmul+add) │─► h
+#       ┌───────┐ │                   └─────────────┘
+#   b ─►│ Add   │─┘─► h
+#       └───────┘                  1 kernel, 1 mem write
+#   2 kernels, 2 mem writes        (intermediate eliminated)
+#
+# 3. PATTERN: Any → ReLU (activation fusion):
+#    - Find a ReLU node whose input is some producer.
+#    - Single-use check on the producer.
+#    - Merge: append "ReLU" to the producer's fused_ops list,
+#      rename op to "XXX_ReLU", redirect consumers, remove ReLU.
+#
+#   ┌───────┐  ┌─────┐              ┌──────────────┐
+#   │Linear │─►│ReLU │       ─►    │Linear_ReLU  │
+#   └───────┘  └─────┘              └──────────────┘
+#   (write h, read h, apply relu)   (apply relu in-place, no extra write)
+#
+# 4. PATTERN: Conv → BatchNorm → ReLU:
+#    - Similar to above but merges BN into Conv first, then ReLU.
+#
+# 5. run_fusion_pipeline() iterates all patterns until no more fusions
+#    are possible (fixpoint), because one fusion may enable another.
+#
+# Performance impact: Fusion typically gives 2–5× speedup on GPU by
+# eliminating intermediate memory traffic.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import numpy as np
