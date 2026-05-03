@@ -4,6 +4,61 @@ Chapter 17 — Model IR: a simple DSL for describing neural networks
 and a graph intermediate representation.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Neural Network Graph IR (High-Level Model Representation)
+#
+# Historical context: This is a simplified version of the graph IRs used
+# by ONNX (2017), TensorFlow's graph_def, and TVM's Relay IR. The core
+# idea: represent a neural network as a DAG of typed tensor operations
+# with shape inference.
+#
+# Problem solved: Provide a structured representation for neural networks
+# that can be:
+# 1. Inspected (summary, visualization)
+# 2. Optimized (operator fusion, dead node elimination in optimizer.py)
+# 3. Lowered to executable code (codegen.py)
+#
+# How it works:
+# - OpType enum defines supported operations (INPUT, MATMUL, ADD, RELU,
+#   SOFTMAX, etc.).
+# - IRNode stores: name, op type, input references (by name), output shape,
+#   and extra attributes (like fused bias, activation type).
+# - ModelGraph provides a builder API:
+#     x = g.input("x", [1, 784])
+#     h = g.matmul(x, w, "fc1")
+#     h = g.relu(h, "relu1")
+#   Each method creates an IRNode, infers the output shape from inputs,
+#   and records it in the graph.
+# - topo_order() returns nodes in dependency order (topological sort)
+#   using DFS. This ensures every node is visited after its inputs.
+#
+#   MLP model definition:           Graph IR (DAG):
+#
+#   x = input([1,784])              x [1,784]
+#   w1 = const([784,128])           │
+#   b1 = const([1,128])             w1──►┌──────┐
+#   h = matmul(x, w1)                    │MatMul│──┐
+#   h = add(h, b1)               b1──►┌──┴──────┘  │ [1,128]
+#   h = relu(h)                       │  Add  │────┘
+#   w2 = const([128,10])              └───┬────┘
+#   b2 = const([1,10])                ┌───┴───┐
+#   h = matmul(h, w2)                 │ ReLU  │     [1,128]
+#   h = add(h, b2)                    └───┬───┘
+#   out = softmax(h)           w2──►┌─────┴────┐
+#                                   │  MatMul  │──┐
+#                            b2──►┌─┴──────────┘  │ [1,10]
+#                                 │    Add    │───┘
+#                                 └────┬──────┘
+#                                 ┌────┴──────┐
+#                                 │  Softmax  │   [1,10]
+#                                 └───────────┘
+#
+#   topo_order(): [x, w1, b1, fc1, add1, relu1, w2, b2, fc2, add2, softmax]
+#
+# The graph is the input to the optimization pipeline (optimizer.py)
+# and then to code generation (codegen.py).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto

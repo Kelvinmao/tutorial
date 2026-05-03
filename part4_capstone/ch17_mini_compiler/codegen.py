@@ -3,6 +3,70 @@
 Chapter 17 — Code generator: emit C code from optimized graph.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Graph IR → C Code Emission (End-to-End Code Generator)
+#
+# Historical context: Code generation from graph IR to C is used by
+# TVM (generates C/CUDA/OpenCL), XLA (generates HLO → LLVM/GPU code),
+# and Glow (generates Bytecode → C). Emitting C is pragmatic: it
+# leverages gcc/clang for final optimization and is portable.
+#
+# Problem solved: Translate the optimized model graph into a complete,
+# standalone C program that performs inference. The generated code must:
+# 1. Allocate all tensor buffers
+# 2. Initialize weights (random for demo; real compilers embed weights)
+# 3. Execute operations in topological order
+# 4. Handle fused operations (MatMul+Add+ReLU in one block)
+# 5. Time the execution and print results
+#
+# How it works:
+# 1. HELPERS: Emit static C functions for common operations:
+#    - matmul(): triple-nested loop matrix multiply
+#    - add_bias(): add bias vector to each row
+#    - relu_inplace(): zero out negatives
+#    - softmax(): numerically stable exp-normalize
+#
+#   Generated C code structure:
+#
+#   ┌─────────────────────────────────────────────────────┐
+#   │ #include <stdio.h>, <math.h>, <time.h>              │
+#   ├─────────────────────────────────────────────────────┤
+#   │ static void matmul(...)  { /* ijk loops */  }       │
+#   │ static void add_bias(...){ /* i,j loop */   }       │
+#   │ static void relu_inplace(){ /* max(0,x) */  }       │
+#   │ static void softmax(...)  { /* exp-norm */  }       │
+#   ├─────────────────────────────────────────────────────┤
+#   │ int main() {                                        │
+#   │   float x[784], w1[784*128], b1[128], ...;          │
+#   │   // init with random values                        │
+#   │   clock_gettime(&start);                            │
+#   │   matmul(x, w1, fc1, 1, 128, 784);                 │
+#   │   add_bias(fc1, b1, 1, 128);     /* fused */        │
+#   │   relu_inplace(fc1, 128);        /* fused */        │
+#   │   matmul(fc1, w2, fc2, 1, 10, 128);                │
+#   │   add_bias(fc2, b2, 1, 10);      /* fused */        │
+#   │   softmax(fc2, 10);                                 │
+#   │   clock_gettime(&end);                              │
+#   │   printf("Result: %f %f ...\n", fc2[0], ...);      │
+#   │ }                                                   │
+#   └─────────────────────────────────────────────────────┘
+#
+# 2. BUFFER ALLOCATION: Walk topo_order, allocate a float array for
+#    each node's output. Inputs/consts are initialized with random data.
+#    Other buffers are zero-initialized with memset.
+#
+# 3. OP DISPATCH: For each non-input node, emit C code based on op type:
+#    - MATMUL: call matmul(). If attrs has "bias", call add_bias().
+#      If attrs has "activation"=="relu", call relu_inplace().
+#    - ADD: inline element-wise loop
+#    - RELU: inline max(0, x) loop
+#    - SOFTMAX: call softmax()
+#
+# 4. TIMING: Wrap the compute section in clock_gettime for measurement.
+#
+# 5. OUTPUT: Print the first 10 elements of the final tensor.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import textwrap
 from model_ir import ModelGraph, IRNode, OpType

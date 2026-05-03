@@ -6,6 +6,52 @@ Usage:
     python compiler.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# CAPSTONE: End-to-End Mini AI Compiler Pipeline
+#
+# This is the capstone that integrates all concepts from the tutorial:
+#
+# Phase 1: MODEL DEFINITION (model_ir.py)
+#   Build an MLP graph: Input(784) → FC(128) → ReLU → FC(10) → Softmax
+#   This is analogous to defining a model in PyTorch/TensorFlow.
+#   Creates ~11 nodes: input, weights, biases, matmuls, adds, relu, softmax.
+#
+# Phase 2: GRAPH OPTIMIZATION (optimizer.py)
+#   Run the same passes as ch09 on our graph:
+#   - Fuse MatMul+Add → Linear (2 fusions)
+#   - Fuse Linear+ReLU → Linear_ReLU (1 fusion)
+#   - Eliminate dead nodes (orphaned Add nodes)
+#   Result: 11 nodes → ~8 nodes (fewer kernel launches)
+#
+# Phase 3: CODE GENERATION (codegen.py)
+#   Emit a complete C program with:
+#   - Stack-allocated tensor buffers
+#   - Calls to matmul, add_bias, relu, softmax helpers
+#   - Timing instrumentation
+#
+# Phase 4: COMPILE & EXECUTE
+#   - Write C code to temp file
+#   - Invoke gcc -O2 to compile
+#   - Run the binary and capture output
+#   - Display inference results and timing
+#
+# This pipeline mirrors production AI compilers:
+#   PyTorch model → TorchScript/ONNX → TVM/XLA graph opts → codegen → run
+#
+#   End-to-end flow:
+#
+#   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────┐
+#   │  Model   │──►│ Optimize │──►│ CodeGen  │──►│ gcc -O2  │──►│ Run  │
+#   │ (Python) │   │ (fusion, │   │ (emit C) │   │ (compile)│   │      │
+#   │          │   │  DCE)    │   │          │   │          │   │      │
+#   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────┘
+#   model_ir.py    optimizer.py    codegen.py      subprocess    output
+#
+#   MLP(784→128→10)  11→8 nodes    ~100 lines C   native binary  inference
+#                    3 fusions      + helper fns   x86_64         result +
+#                    3 DCE                                        timing
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import subprocess
 import tempfile

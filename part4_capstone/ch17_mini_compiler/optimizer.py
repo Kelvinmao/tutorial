@@ -3,6 +3,52 @@
 Chapter 17 — Graph + tensor optimizations for the mini compiler.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHMS: Graph Optimization Passes for the Mini AI Compiler
+#
+# This module implements the optimization passes from chapter 9 in a
+# production-style pipeline. The three passes are:
+#
+# 1. MATMUL + ADD FUSION (fuse_matmul_add):
+#    Pattern: MatMul(x, w) → Add(result, bias)
+#    Result:  MatMul(x, w, bias=bias)  [single fused node]
+#    How: Find Add nodes whose input is a MatMul. Store the bias in
+#    the MatMul's attrs["bias"]. Redirect all consumers of Add to
+#    point to MatMul. Delete the Add node.
+#    Benefit: Eliminates one kernel launch and one memory round-trip.
+#
+# 2. RELU FUSION (fuse_relu):
+#    Pattern: MatMul/Add → ReLU
+#    Result:  MatMul/Add with attrs["activation"] = "relu"
+#    How: Find ReLU nodes whose input is a MatMul or Add. Mark the
+#    producer's activation attribute. Redirect consumers and delete ReLU.
+#    Benefit: ReLU is applied in-place within the fused kernel.
+#
+# 3. DEAD NODE ELIMINATION (eliminate_dead_nodes):
+#    Same algorithm as DCE in ch06 but for graph nodes:
+#    - Build a "used" set from all node inputs.
+#    - Add the final output node to "used".
+#    - Remove any non-input node not in the used set.
+#    Benefit: After fusion, orphaned nodes are cleaned up.
+#
+# Combined effect on a typical MLP:
+#   Before: x → MatMul → Add → ReLU → MatMul → Add → Softmax (7 nodes)
+#   After:  x → MatMul+Add+ReLU → MatMul+Add → Softmax (3 compute nodes)
+#
+#   Before optimization (11 nodes):      After optimization (8 nodes):
+#
+#   x ─► MatMul ─► Add ─► ReLU          x ─► MatMul+Add+ReLU
+#   w1 ─┘    b1 ─┘                       w1 ─┘    b1 ─┘
+#                    │                               │
+#               MatMul ─► Add ─► Softmax        MatMul+Add ─► Softmax
+#          w2 ─┘    b2 ─┘                  w2 ─┘    b2 ─┘
+#
+#   Fusions applied:
+#   1. MatMul + Add → fused (bias stored in MatMul attrs)  ×2
+#   2. MatMul+Add + ReLU → fused (activation="relu")       ×1
+#   3. Dead node elimination (orphaned Add/ReLU removed)   ×3
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from model_ir import ModelGraph, IRNode, OpType
 from rich.console import Console
