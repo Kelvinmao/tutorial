@@ -2,6 +2,45 @@
 Chapter 3 — AST Node definitions for MiniLang.
 
 Every node type in the Abstract Syntax Tree is a simple dataclass.
+
+Design rationale: The AST is the central data structure of the compiler
+frontend. It represents the *structure* of the program stripped of syntactic
+noise (semicolons, parentheses, indentation). Each node corresponds to a
+semantic concept: declarations, control flow, expressions.
+
+Historical context: ASTs became standard in the 1970s as compilers moved
+from ad-hoc translation to structured multi-pass architectures. Earlier
+compilers used parse trees (concrete syntax trees), but ASTs are more
+compact because they omit tokens that only serve parsing (like parentheses).
+
+Organization: The hierarchy follows the grammar:
+  Program → list of Statement
+  Statement → LetDecl | IfStmt | WhileStmt | FuncDef | ...
+  Expr → BinOp | UnaryOp | IntLit | Identifier | FuncCall | ...
+
+  Source code:                 AST:
+
+    let x = 2 + 3 * 4               Program
+    if x > 10:                       │
+        return x                     ├── LetDecl(x)
+                                     │     └── BinOp(+)
+                                     │          ├── IntLit(2)
+                                     │          └── BinOp(*)
+                                     │               ├── IntLit(3)
+                                     │               └── IntLit(4)
+                                     └── IfStmt
+                                           ├── cond: BinOp(>)
+                                           │        ├── Ident(x)
+                                           │        └── IntLit(10)
+                                           └── then: [ReturnStmt]
+                                                      └── Ident(x)
+
+  Note: parentheses from source don't appear in the AST -- they only
+  guide the parser in deciding tree structure (precedence).
+
+Each downstream phase (type checker ch04, IR builder ch05) walks these
+nodes via isinstance() dispatch. This is the "Interpreter" pattern—
+simple and sufficient for a small language.
 """
 
 from __future__ import annotations

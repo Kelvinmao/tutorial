@@ -8,6 +8,59 @@ Usage:
     python llvm_emitter.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Custom IR → LLVM IR Translation (Backend Emission)
+#
+# Historical context: LLVM began as Chris Lattner's 2003 PhD project at
+# UIUC. Its key innovation was defining a well-typed, SSA-form IR that
+# any language frontend can target, decoupling frontends from backends.
+# Today, LLVM is used by Clang (C/C++), Rust, Swift, Julia, and many
+# AI compilers (TVM, XLA). It handles the hard backend work: register
+# allocation, instruction scheduling, and machine code emission.
+#
+# Problem solved: Our custom IR (ch05) is simple but we need real machine
+# code. Instead of writing a full backend (instruction selection, register
+# allocation, etc.), we translate our IR to LLVM IR and let LLVM handle
+# the rest. This is the standard approach for new languages.
+#
+# How it works:
+# 1. Create an LLVM module (container for functions and globals).
+# 2. Create a function ("main") with an entry basic block.
+# 3. Use stack allocations (alloca) for all variables. Each variable
+#    gets a slot on the stack; loads and stores access it. (This is
+#    simple but not optimal — LLVM's mem2reg pass promotes these to
+#    SSA registers during optimization.)
+# 4. Translate each custom IR instruction to LLVM IR instructions:
+#    - LOAD_CONST → store constant to alloca
+#    - ADD/SUB/MUL/DIV → load operands, emit LLVM arithmetic, store result
+#    - BRANCH → load condition, icmp != 0, cbranch to true/false blocks
+#    - PRINT → call printf with format string
+# 5. Terminate the function with a return instruction.
+#
+#   Custom IR:                 LLVM IR:
+#
+#   t0 = 4                     %t0 = alloca i64
+#   t1 = t0 * x                store i64 4, i64* %t0
+#   t2 = t1 + 1                %1 = load i64, i64* %t0
+#   y  = t2                    %2 = load i64, i64* %x
+#                               %3 = mul i64 %1, %2
+#                               store i64 %3, i64* %t1
+#                               %4 = load i64, i64* %t1
+#                               %5 = add i64 %4, 1
+#                               store i64 %5, i64* %t2
+#                               %6 = load i64, i64* %t2
+#                               store i64 %6, i64* %y
+#
+#   After LLVM mem2reg pass:   %3 = mul i64 4, %x
+#   (alloca → SSA registers)   %5 = add i64 %3, 1
+#                               (clean SSA, no loads/stores)
+#
+# Key LLVM concepts used:
+#   - SSA form: each register is assigned exactly once
+#   - Basic blocks: each must end with a terminator (ret, br)
+#   - Types: everything is explicitly typed (i64, i8*, etc.)
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import sys

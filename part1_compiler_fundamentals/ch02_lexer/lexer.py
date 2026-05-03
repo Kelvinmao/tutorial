@@ -9,6 +9,68 @@ Usage:
     python -c "from lexer import tokenize; print(tokenize('let x = 1 + 2'))"
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Hand-Written Lexer (Scanner) using a Finite State Machine
+#
+# Historical context: The first compilers (Fortran, 1957) combined lexing
+# and parsing into one ad-hoc pass. Separating lexing as a distinct phase
+# was formalized in the 1960s, and tools like Lex (1975) automated it
+# using regular expressions compiled to deterministic finite automata (DFAs).
+# Hand-written lexers remain common in production compilers (GCC, Clang,
+# Go, Rust) because they offer better error messages and performance.
+#
+# Problem solved: Raw source code is a stream of characters. The parser
+# needs a stream of classified *tokens* (keyword, identifier, number,
+# operator, etc.) with whitespace and comments removed.
+#
+#   Source text:  "let x = 42 + y\n    return x"
+#                  │
+#   ┌─────────────┴─────────────────────────────────┐
+#   │  Finite State Machine (character by character)    │
+#   │                                                   │
+#   │  'l','e','t'  ───► word "let" ─► KEYWORDS ─► LET   │
+#   │  ' '          ───► skip                            │
+#   │  'x'          ───► word "x"  ─► not keyword ► ID  │
+#   │  '='          ───► peek '=' ? no ─► EQUALS        │
+#   │  '4','2'      ───► number 42 ─► INT              │
+#   │  '+'          ───► PLUS                           │
+#   │  'y'          ───► word "y"  ─► ID               │
+#   │  '\n'         ───► NEWLINE + check indentation   │
+#   │  '    '       ───► indent 4 > 0 ─► INDENT        │
+#   │  'r','e',...   ───► word "return" ─► RETURN       │
+#   └───────────────────────────────────────────────┘
+#                  │
+#   Output: [LET, ID(x), EQUALS, INT(42), PLUS, ID(y),
+#            NEWLINE, INDENT, RETURN, ID(x), NEWLINE,
+#            DEDENT, EOF]
+#
+#   Indent stack:  [0]  →  [0, 4]  →  [0]  (push/pop on indent changes)
+#
+# How it works:
+# 1. Maintain a cursor (self.pos) pointing to the current character.
+# 2. At each step, peek at the current character to decide what kind
+#    of token starts here:
+#    - Letter/underscore → scan a word (identifier or keyword lookup)
+#    - Digit → scan a number (integer or float)
+#    - Quote → scan a string literal (with escape sequences)
+#    - Operator chars → check for two-char ops (==, !=, ->) first,
+#      then fall back to single-char ops (+, -, *, etc.)
+#    - Newline → emit NEWLINE token, then handle indentation on the
+#      next line (Python-style INDENT/DEDENT for block structure)
+# 3. Track line/column for error reporting.
+# 4. Maintain an indent_stack to emit INDENT/DEDENT tokens that let
+#    the parser handle Python-style indentation-based blocks.
+# 5. Append EOF when the source is exhausted.
+#
+# Key design choices:
+# - Keywords are recognized by scanning a word first, then looking it
+#   up in the KEYWORDS dict. This avoids needing separate states for
+#   each keyword and keeps the state machine simple.
+# - Two-character operators are handled by a "maximal munch" strategy:
+#   after consuming the first character, peek ahead to see if a longer
+#   token matches (e.g., "=" might be EQUALS or the start of "==").
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -113,6 +175,17 @@ class Lexer:
 
     Consumes raw source text and yields Token objects.  Tracks line/column
     for error reporting.  Handles indentation-based blocks (simplified).
+
+    Implementation: The lexer operates as a character-level state machine.
+    self.pos is the read head. _peek() looks without consuming, _advance()
+    moves forward. Multi-character tokens (numbers, words, strings) are
+    scanned by dedicated methods (_scan_number, _scan_word, _scan_string)
+    that advance the cursor until the token boundary, then return a Token.
+
+    Indentation handling: At the start of each line, _handle_indentation()
+    counts leading spaces, compares against a stack of indent levels, and
+    emits INDENT when the level increases or DEDENT(s) when it decreases.
+    This mirrors CPython's tokenizer approach for Python-style blocks.
     """
 
     def __init__(self, source: str):

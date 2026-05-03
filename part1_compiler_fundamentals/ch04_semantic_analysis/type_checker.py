@@ -11,6 +11,57 @@ Usage:
     python type_checker.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Semantic Analysis — Scoped Symbol Table + Type Checking
+#
+# Historical context: Semantic analysis was formalized alongside type theory
+# in the 1960s–70s (Algol 68 had one of the first rigorous type systems).
+# The parser validates *syntax* (is the program grammatically correct?),
+# but semantic analysis validates *meaning* (are operations type-safe?
+# are variables declared before use? do function signatures match calls?).
+#
+# Problem solved: Catch errors that are syntactically valid but
+# semantically wrong. For example:
+#   let x: int = "hello"    → Type mismatch (int vs string)
+#   print(y)                → Undeclared variable 'y'
+#   if 42: ...              → Condition should be bool, not int
+#
+# ALGORITHM 1 — Scoped Symbol Table:
+# - A stack of dictionaries, one per scope (global, function, if/while block).
+# - declare() adds a variable to the current (innermost) scope.
+# - lookup() searches from innermost to outermost — this gives lexical scoping.
+# - enter_scope() pushes a new dict; exit_scope() pops it.
+# This is the standard approach used by most compilers (GCC, Clang, javac).
+#
+#   let x: int = 1
+#   def foo(y: int) -> int:       Scope stack during foo body:
+#       let z = x + y
+#       return z                  ┌────────────────────┐  ← innermost (foo)
+#                                 │ z: int, y: int   │
+#                                 └────────────────────┘
+#                                 ┌────────────────────┐  ← outermost (global)
+#                                 │ x: int, foo: fn  │
+#                                 └────────────────────┘
+#
+#   lookup("z") → found in scope[1] (foo)      ✓
+#   lookup("x") → not in scope[1], found in scope[0] (global) ✓
+#   lookup("w") → not in any scope → ERROR: undeclared
+#
+# ALGORITHM 2 — Type Checking via AST Walk:
+# - Recursively visit every AST node.
+# - For each expression, infer its type bottom-up:
+#     IntLit → "int", FloatLit → "float", BoolLit → "bool"
+#     Identifier → look up in symbol table
+#     BinOp → check operands, apply promotion (int + float → float)
+#     Comparison → always returns "bool"
+#     FuncCall → extract return type from function signature
+# - For each statement, check type constraints:
+#     LetDecl → value type must match declared type
+#     IfStmt → condition must be bool
+#     ReturnStmt → value type must match function return type
+# - Collect errors rather than aborting on the first one.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import sys
@@ -49,6 +100,16 @@ class SymbolTable:
 
     Each scope is a dict mapping variable names to Symbol objects.
     Lookup walks from the innermost scope outward.
+
+    This implements lexical (static) scoping: a variable reference resolves
+    to the nearest enclosing declaration. The stack grows when we enter
+    a block (function body, if/while body) and shrinks when we leave.
+
+    Example scope stack for a function call:
+      [global_scope, function_scope, if_body_scope]
+       │               │                └─ local vars in if
+       │               └─ function params + locals
+       └─ top-level declarations
     """
     def __init__(self):
         self.scopes: list[dict[str, Symbol]] = [{}]  # start with global scope

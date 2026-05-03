@@ -8,6 +8,56 @@ Usage:
     python constant_folding.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Constant Folding (with Constant Propagation)
+#
+# Historical context: Constant folding is one of the oldest compiler
+# optimizations, present even in early Fortran compilers (1957). The
+# idea is simple but powerful: if the compiler knows the values of both
+# operands at compile time, it can compute the result immediately.
+#
+# Problem solved: Programs often contain expressions like "2 + 3" or
+# "width * 2" where width was assigned a constant. Without this pass,
+# the CPU would evaluate these at runtime even though the answer is
+# known at compile time.
+#
+# How it works:
+# 1. Maintain a dictionary "known" mapping register names to their
+#    known constant values.
+# 2. Scan instructions sequentially:
+#    - LOAD_CONST dst, value: Record known[dst] = value.
+#    - COPY dst, src: If src is in known, propagate: known[dst] = known[src].
+#      (This is the "constant propagation" part.)
+#    - ADD/SUB/MUL/...: Look up both src1 and src2 in known.
+#      If both are constants, compute the result, store it in known[dst],
+#      and replace the instruction with a LOAD_CONST.
+#    - Comparisons (EQ, LT, etc.): Same approach, fold to 0 or 1.
+#    - NEG: If operand is known, negate it.
+# 3. Folded instructions are replaced in-place in the output list.
+#
+#   Example trace:              known dict:
+#
+#   t0 = 2                      {t0: 2}
+#   t1 = 3                      {t0: 2, t1: 3}
+#   t2 = t0 + t1                both known! → fold:
+#     └─► t2 = 5                 {t0: 2, t1: 3, t2: 5}
+#   x = t2                      propagate:
+#     └─► x = 5                  {t0: 2, t1: 3, t2: 5, x: 5}
+#   t3 = x * 10                 x known! 10 is literal! → fold:
+#     └─► t3 = 50                {... t3: 50}
+#
+#   Before:           After:
+#   t0 = 2            t0 = 2        ← can be removed by DCE
+#   t1 = 3            t1 = 3        ← can be removed by DCE
+#   t2 = t0 + t1      t2 = 5        ← folded
+#   x  = t2           x  = 5        ← propagated
+#   t3 = x * 10       t3 = 50       ← folded
+#
+# Complexity: O(n) single pass over the instruction list.
+# Limitation: This is intra-procedural and doesn't handle control flow
+# (a value assigned in one branch may not be constant in another).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import sys, os
 

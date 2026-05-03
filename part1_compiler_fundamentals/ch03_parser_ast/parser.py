@@ -9,6 +9,65 @@ Usage:
     python -c "from parser import parse_source; ..."
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Recursive Descent Parser with Precedence Climbing
+#
+# Historical context: Recursive descent parsing was described by Lucas (1961)
+# and Hoare (1962). It became the most popular hand-written parsing technique
+# because each grammar rule maps directly to a function, making the code
+# easy to read, debug, and extend. GCC, Clang, Go, Rust, and CPython all
+# use hand-written recursive descent parsers.
+#
+# Problem solved: Given a flat sequence of tokens, build a hierarchical
+# Abstract Syntax Tree (AST) that captures the program's structure.
+# The parser must enforce:
+#   - Operator precedence (* before +)
+#   - Associativity (left-to-right for arithmetic)
+#   - Statement structure (let, if, while, def, return)
+#   - Nested blocks (via INDENT/DEDENT tokens)
+#
+# How it works:
+# 1. GRAMMAR → FUNCTIONS: Each grammar rule becomes a method.
+#      program → statement*
+#      statement → let | if | while | def | return | assign | expr_stmt
+#      expr → comparison
+#      comparison → additive (('==' | '<' | ...) additive)?
+#      additive → multiplicative (('+' | '-') multiplicative)*
+#      multiplicative → unary (('*' | '/') unary)*
+#      unary → '-' unary | primary
+#      primary → INT | FLOAT | BOOL | STRING | ID | ID '(' args ')' | '(' expr ')'
+#
+# 2. PRECEDENCE BY NESTING: Lower-precedence rules call higher-precedence
+#    rules for their operands. parse_additive() calls parse_multiplicative()
+#    as its "atom", so * binds tighter than +.
+#
+#    Parsing "2 + 3 * 4":
+#
+#    parse_additive()
+#    │  calls parse_multiplicative()  → returns Num(2)
+#    │  sees '+'
+#    │  calls parse_multiplicative()  → enters loop:
+#    │     │  calls parse_primary()    → returns Num(3)
+#    │     │  sees '*'
+#    │     │  calls parse_primary()    → returns Num(4)
+#    │     └─ returns BinOp(*, 3, 4)
+#    └─ returns BinOp(+, 2, BinOp(*, 3, 4))
+#
+#    Result:     (+)
+#               /   \
+#              2    (*)
+#                  /   \
+#                 3     4
+#
+# 3. LOOKAHEAD: The parser peeks at the current token to decide which rule
+#    to apply. Assignment vs. expression is decided by checking if the next
+#    two tokens are ID EQUALS. Function call is detected by seeing ID LPAREN.
+#
+# 4. INDENTATION BLOCKS: The lexer emits INDENT/DEDENT tokens, so the
+#    parser handles blocks just like any other token — _parse_block() eats
+#    INDENT, parses statements, then eats DEDENT.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import sys

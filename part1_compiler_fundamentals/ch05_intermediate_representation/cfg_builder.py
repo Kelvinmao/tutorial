@@ -9,6 +9,65 @@ Usage:
     python cfg_builder.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Basic Block Identification + Control Flow Graph Construction
+#
+# Historical context: Frances Allen (IBM, 1970) pioneered control flow
+# analysis and the concept of basic blocks. Her work earned the 2006
+# Turing Award. The CFG is the foundation of nearly all compiler
+# optimizations — it lets the compiler reason about which paths the
+# program can take and what facts hold at each point.
+#
+# Problem solved: A flat IR instruction list doesn't show control flow
+# structure. The optimizer needs to know: "if I'm at instruction X, which
+# instructions could execute next?" The CFG provides this.
+#
+# ALGORITHM — Three-step construction:
+#
+# Step 1: Find leaders (instructions that start new basic blocks).
+#   A leader is:
+#   a) The very first instruction
+#   b) Any LABEL instruction (it's a branch target)
+#   c) Any instruction immediately *after* a JUMP or BRANCH
+#      (the fallthrough point)
+#   d) FUNC_BEGIN (function entry point)
+#
+# Step 2: Partition instructions into basic blocks.
+#   Each block starts at a leader and extends to (but not including)
+#   the next leader. Within a block, execution is strictly sequential
+#   — no branches in, no branches out (except at the end).
+#
+# Step 3: Add edges between blocks.
+#   - JUMP to label L → edge to block L
+#   - BRANCH cond, true_label, false_label → edges to both
+#   - If the last instruction is neither jump nor return, add a
+#     fall-through edge to the next sequential block.
+#
+# The resulting CFG is a directed graph where:
+#   Nodes = basic blocks (straight-line instruction sequences)
+#   Edges = possible control flow transitions
+#
+#   IR Instructions:               Control Flow Graph:
+#
+#   0: x = 10                      ┌───────────────┐
+#   1: LABEL cond                  │ BB0 (entry)   │  x = 10
+#   2: t0 = x > 0                 │               │
+#   3: BRANCH t0, body, end       └───────┬───────┘
+#   4: LABEL body                         │
+#   5: x = x - 1                   ┌─────┴─────────┐
+#   6: JUMP cond                   │ BB1 (cond)    │  t0 = x > 0
+#   7: LABEL end                   │               │  BRANCH t0
+#   8: RETURN x                    └──┬───────┬───┘
+#                               true│         │false
+#                            ┌─────┴───┐  ┌──┴────────┐
+#                            │ BB2 (body)│  │ BB3 (end)  │
+#                            │ x = x - 1│  │ RETURN x   │
+#                            │ JUMP cond│  └───────────┘
+#                            └────┬─────┘
+#                                 │  (back edge)
+#                                 └─────► BB1
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import sys

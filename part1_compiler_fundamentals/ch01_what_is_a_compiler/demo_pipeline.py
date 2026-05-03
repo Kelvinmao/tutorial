@@ -23,6 +23,40 @@ def show_source(source: str):
                         border_style="cyan"))
 
 # ─── Phase 1: Lexer (Tokenizer) ────────────────────────────────────────────
+#
+# ALGORITHM: Lexical Analysis (Scanning / Tokenization)
+#
+# Historical context: Lexers date back to the 1950s–60s (Fortran, COBOL).
+# The idea is that raw source text is just a stream of characters, which is
+# hard for a parser to reason about. Lexing groups characters into meaningful
+# "tokens" — the atoms of the language (keywords, numbers, operators).
+#
+# Problem solved: Convert a flat character stream into a sequence of
+# classified tokens, discarding whitespace and comments.
+#
+#   Source: "y = 4 * x + 1"
+#            │
+#            ▼
+#   ┌──────────────────────────────────────────────┐
+#   │  y   =   4   *   x   +   1                  │
+#   │  ↓   ↓   ↓   ↓   ↓   ↓   ↓                  │
+#   │  ID  EQ  INT MUL ID  ADD INT                 │
+#   └──────────────────────────────────────────────┘
+#            │
+#            ▼
+#   Tokens: [(ID,"y"), (EQ,"="), (INT,"4"), (STAR,"*"),
+#            (ID,"x"), (PLUS,"+"), (INT,"1"), (EOF)]
+#
+# How it works: Walk through the source character by character. At each
+# position, decide what kind of token starts here (letter → identifier or
+# keyword, digit → number, symbol → operator). Accumulate characters until
+# the token ends, then emit a (type, value) record. This is essentially a
+# finite state machine running over the input.
+#
+# This simplified version handles: identifiers, integers, floats, and
+# single-character operators. Chapter 2 expands this into a full-featured
+# lexer with keywords, strings, indentation tracking, and error reporting.
+# ────────────────────────────────────────────────────────────────────────────
 
 TOKEN_TYPES = {
     "ID": "green", "INT": "yellow", "FLOAT": "yellow",
@@ -77,6 +111,52 @@ def show_tokens(tokens: list[dict]):
                         border_style="cyan"))
 
 # ─── Phase 2: Parser (AST) ──────────────────────────────────────────────────
+#
+# ALGORITHM: Recursive Descent Parsing
+#
+# Historical context: Recursive descent was described in the early 1960s
+# and became popular because it maps grammar rules directly to functions.
+# Each grammar production (e.g., "expr → term (('+' | '-') term)*") becomes
+# a function that calls other functions, making the code mirror the grammar.
+#
+# Problem solved: A flat token list has no structure — we need a tree
+# (the Abstract Syntax Tree, AST) that captures how sub-expressions nest.
+# For example, in "2 + 3 * 4", multiplication must bind tighter than
+# addition — the AST must reflect: Add(2, Mul(3, 4)).
+#
+#   Tokens: ID(y) = INT(4) * ID(x) + INT(1)
+#           │
+#           ▼  Recursive Descent
+#
+#       ┌─── Assign ───┐
+#       │              │
+#     "y"          BinOp(+)
+#                ┌─────┴─────┐
+#            BinOp(*)      Num(1)
+#           ┌────┴────┐
+#         Num(4)    Var(x)
+#
+#   parse_additive()
+#     └── parse_multiplicative()    ← called first (higher precedence)
+#           └── parse_primary()     ← handles leaves: Num, Var, (expr)
+#
+# How it works:
+# 1. Each precedence level gets its own function:
+#    parse_additive() → handles +, - (lowest precedence)
+#    parse_multiplicative() → handles *, / (higher precedence)
+#    parse_primary() → handles literals, variables, parens (highest)
+# 2. Higher-precedence functions are called *as operands* of lower ones.
+#    So parse_additive() calls parse_multiplicative() for its left & right
+#    children, which ensures * binds before +.
+# 3. pos[0] (a mutable list used as a pointer) tracks the current token.
+#    peek() looks at the current token, eat() consumes it.
+# 4. Assignment is handled by lookahead: if the first two tokens are
+#    ID EQUALS, parse it as an assignment; otherwise parse as expression.
+#
+# This approach is called "top-down" because we start from the start symbol
+# and recursively descend into sub-rules. Chapter 3 expands this to handle
+# if/while/function definitions and indentation-based blocks.
+# ────────────────────────────────────────────────────────────────────────────
 
 class ASTNode:
     pass
@@ -194,6 +274,41 @@ def show_ast(ast: ASTNode):
                         border_style="cyan"))
 
 # ─── Phase 3: Semantic Analysis ─────────────────────────────────────────────
+#
+# ALGORITHM: Type Checking via AST Traversal + Symbol Table
+#
+# Historical context: Semantic analysis became essential in the 1960s–70s
+# as languages introduced type systems (Algol 68, Pascal, C). The parser
+# checks *syntax* (structural validity) but cannot catch *meaning* errors
+# like using an undeclared variable or adding a string to an integer.
+#
+# Problem solved: Verify that operations are semantically valid. Track
+# which variables exist and what types they hold. Detect type mismatches.
+#
+#       ┌─── Assign ───┐
+#       │              │
+#     "y"          BinOp(+)       Symbol Table:
+#                ┌─────┴────┐     ┌──────┬──────┐
+#            BinOp(*)     Num(1)  │ Name │ Type │
+#           ┌────┴────┐   :int   ├──────┼──────┤
+#         Num(4)    Var(x)        │  x   │ int  │
+#         :int      :int ←lookup  │  y   │ int  │
+#                                 └──────┴──────┘
+#         int * int = int
+#              int + int = int
+#                   y ← int   (recorded)
+#
+# How it works:
+# 1. Walk the AST recursively. For each node, infer or check its type.
+# 2. Maintain a symbol_table dict mapping variable names to their types.
+# 3. For BinOp nodes: check both operands, then apply promotion rules
+#    (e.g., int + float → float).
+# 4. For Assign nodes: infer the type of the value, record it in the table.
+# 5. For Var nodes: look up the variable in the table.
+#
+# This simplified version auto-declares unknown variables as "int".
+# Chapter 4 builds a full scoped symbol table with error reporting.
+# ────────────────────────────────────────────────────────────────────────────
 
 def type_check(node: ASTNode, symbol_table: dict | None = None) -> str:
     """Minimal type checker — returns the inferred type."""
@@ -233,6 +348,40 @@ def show_semantic(ast: ASTNode):
     console.print(table)
 
 # ─── Phase 4: IR (Three-Address Code) ──────────────────────────────────────
+#
+# ALGORITHM: AST → Three-Address Code (TAC) Lowering
+#
+# Historical context: Three-address code was formalized in the 1970s
+# (Aho, Ullman — the "Dragon Book"). The key insight is that complex
+# nested expressions can be flattened into a sequence of simple instructions,
+# each with at most three operands: dst = src1 op src2.
+#
+# Problem solved: The AST is tree-shaped and tied to the source language.
+# We need a flat, machine-like representation that is easy to optimize and
+# translate to assembly. TAC is that intermediate representation (IR).
+#
+#       ┌─── Assign ───┐             Three-Address Code:
+#       │              │              ┌─────────────────────┐
+#     "y"          BinOp(+)     ──►   │ t0 = 4              │
+#                ┌─────┴────┐         │ t1 = t0 * x         │
+#            BinOp(*)     Num(1)      │ t2 = 1              │
+#           ┌────┴────┐               │ t3 = t1 + t2        │
+#         Num(4)    Var(x)            │ y  = t3             │
+#                                     └─────────────────────┘
+#   Tree (recursive)            ──►   Flat list (sequential)
+#
+# How it works:
+# 1. Recursively walk the AST. For each sub-expression, generate IR
+#    instructions and return the name of the register holding the result.
+# 2. Each intermediate result gets a fresh temporary name (t0, t1, ...).
+# 3. Leaf nodes (Num) emit a LOAD instruction: t0 = 42.
+# 4. Binary ops emit: t2 = t0 + t1.
+# 5. Assignments emit a COPY: x = t2.
+#
+# The result is a flat list of instructions that a backend can translate
+# to assembly 1-to-1. Chapter 5 extends this with labels, jumps, branches,
+# function calls, and builds a Control Flow Graph (CFG) from the IR.
+# ────────────────────────────────────────────────────────────────────────────
 
 class IRInstruction:
     def __init__(self, op, dst, src1, src2=None):
@@ -292,6 +441,44 @@ def show_ir(ast: ASTNode) -> list[IRInstruction]:
     return instructions
 
 # ─── Phase 5: Optimization ─────────────────────────────────────────────────
+#
+# ALGORITHMS: Constant Folding + Dead Code Elimination
+#
+# Historical context: Compiler optimizations emerged in the 1960s–70s
+# (Frances Allen's work on control flow analysis won the Turing Award).
+# The idea: if the compiler can compute something at compile time, don't
+# make the CPU compute it at run time.
+#
+# Problem solved: Eliminate redundant computation. For example:
+#   t0 = 2; t1 = 3; t2 = t0 * t1  →  t2 = 6  (constant folding)
+#   Then t0 and t1 are unused       →  removed (dead code elimination)
+#
+#   Before optimization:          After optimization:
+#   ┌───────────────────┐         ┌───────────────────┐
+#   │ t0 = 4            │         │                   │
+#   │ t1 = t0 * x       │  ──►   │ t1 = 4 * x        │  (t0 inlined)
+#   │ t2 = 1            │         │                   │
+#   │ t3 = t1 + t2      │  ──►   │ t3 = t1 + 1       │  (t2 inlined)
+#   │ y  = t3           │         │ y  = t3           │
+#   └───────────────────┘         └───────────────────┘
+#   5 instructions                3 instructions (40% reduction)
+#
+# How it works (Constant Folding):
+# 1. Maintain a dict "known" mapping register names to their constant values.
+# 2. LOAD instructions record the constant: known["t0"] = 2.
+# 3. For arithmetic instructions, look up both operands in "known".
+#    If both are constants, compute the result immediately and replace
+#    the instruction with a LOAD of the computed value.
+# 4. Propagate the result: known["t2"] = 6.
+#
+# How it works (Dead Code Elimination):
+# 1. Scan all instructions to find which registers are actually *read*
+#    (appear as src1 or src2). Collect these into a "used" set.
+# 2. Remove any instruction whose destination is a temporary (t-prefixed)
+#    that is NOT in the used set — nobody reads it, so it's dead.
+#
+# Chapter 6 implements these as separate, reusable passes plus CSE.
+# ────────────────────────────────────────────────────────────────────────────
 
 def optimize_ir(instructions: list[IRInstruction]) -> list[IRInstruction]:
     """Simple constant-folding pass."""
@@ -347,6 +534,44 @@ def show_optimization(before: list[IRInstruction], after: list[IRInstruction]):
                         border_style="cyan"))
 
 # ─── Phase 6: Code Generation ──────────────────────────────────────────────
+#
+# ALGORITHM: IR → Assembly Translation (Instruction Selection)
+#
+# Historical context: Code generation was one of the original compiler
+# problems — early Fortran (1957) had to translate high-level math to
+# IBM 704 machine instructions. Modern compilers use LLVM or GCC backends
+# that handle instruction selection, register allocation, and scheduling.
+#
+# Problem solved: Translate the abstract IR instructions into concrete
+# machine instructions that a CPU can execute.
+#
+#   IR Instruction           Assembly Output
+#   ┌───────────────────┐    ┌──────────────────────────┐
+#   │ t1 = 4 * x        │───►│ MOV  t1, x               │
+#   │                   │    │ MUL  t1, #4              │
+#   ├───────────────────┤    ├──────────────────────────┤
+#   │ t3 = t1 + 1       │───►│ MOV  t3, t1              │
+#   │                   │    │ ADD  t3, #1              │
+#   ├───────────────────┤    ├──────────────────────────┤
+#   │ y  = t3           │───►│ MOV  y,  t3              │
+#   └───────────────────┘    └──────────────────────────┘
+#
+# How it works:
+# 1. Walk the flat IR instruction list.
+# 2. Map each IR opcode to the corresponding assembly mnemonic:
+#    LOAD → MOV dst, #immediate
+#    COPY → MOV dst, src
+#    + → ADD, - → SUB, * → MUL, / → DIV
+# 3. Emit the pseudo-assembly as text.
+#
+# This is a simplified 1-to-1 mapping. A real backend would also do:
+# - Register allocation (map infinite virtual registers to finite HW regs)
+# - Instruction scheduling (reorder to hide latency)
+# - Peephole optimization (combine adjacent instructions)
+#
+# Chapter 7 replaces this with a real LLVM backend that produces native
+# machine code and can JIT-execute it.
+# ────────────────────────────────────────────────────────────────────────────
 
 def codegen(instructions: list[IRInstruction]) -> str:
     """Generate pseudo-assembly from optimized IR."""

@@ -8,6 +8,59 @@ Usage:
     python ir_builder.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: AST → Three-Address Code (TAC) IR Lowering
+#
+# Historical context: Three-address code was formalized by Aho and Ullman
+# in the 1970s "Dragon Book". The core insight: any complex expression
+# tree can be flattened into a linear sequence of simple instructions,
+# each with at most one operator and three operands (dst = src1 op src2).
+# This representation is close to what real hardware executes and is ideal
+# for optimization passes.
+#
+# Problem solved: The AST is hierarchical and source-language-specific.
+# We need a flat, language-independent representation that:
+# - Is easy to analyze and optimize (each instruction is simple)
+# - Maps naturally to machine code (registers, jumps, calls)
+# - Can represent control flow (labels, branches, jumps)
+#
+# How it works:
+# 1. Recursively walk the AST. Each _build_expr() call returns the name
+#    of the register (or variable) holding the result.
+# 2. Temporaries (t0, t1, ...) are generated for intermediate values.
+# 3. Control flow is lowered to labels + jumps + conditional branches:
+#    - IfStmt → BRANCH cond, then_label, else_label
+#    - WhileStmt → LABEL cond_label; BRANCH ...; LABEL body; JUMP cond
+# 4. Function calls → PARAM for each arg, then CALL.
+#
+#   AST:                         IR (Three-Address Code):
+#
+#   IfStmt                       LABEL cond_check
+#    ├─ cond: BinOp(>, x, 0)      t0 = x > 0
+#    ├─ then: [ReturnStmt(x)]     BRANCH t0, then_L, else_L
+#    └─ else: [ReturnStmt(0)]     LABEL then_L
+#                                 RETURN x
+#                                 JUMP end_L
+#                                 LABEL else_L
+#                                 RETURN 0
+#                                 LABEL end_L
+#
+#   Nested expressions flatten out:
+#
+#   BinOp(+, BinOp(*, a, b), c)   t0 = a * b
+#                                  t1 = t0 + c
+#
+# Key opcodes:
+#   LOAD_CONST  dst = value      (load an immediate value)
+#   COPY        dst = src        (variable assignment)
+#   ADD/SUB/... dst = s1 op s2   (arithmetic)
+#   LABEL       name:            (branch target)
+#   JUMP        goto target      (unconditional branch)
+#   BRANCH      if cond goto T else F (conditional branch)
+#   CALL        dst = call func  (function invocation)
+#   PRINT       print src        (side-effect I/O)
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 
 import sys

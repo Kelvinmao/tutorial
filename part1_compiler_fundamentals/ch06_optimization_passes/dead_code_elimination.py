@@ -8,6 +8,52 @@ Usage:
     python dead_code_elimination.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Dead Code Elimination (DCE) — Fixpoint Iteration
+#
+# Historical context: DCE was formalized as part of data-flow analysis
+# in the 1970s (Allen & Cocke, Kildall). It's a "backward" analysis:
+# we ask "who reads this value?" and eliminate writes with no readers.
+# It often works in tandem with constant folding — after folding replaces
+# an instruction, its operands may become unused (dead).
+#
+# Problem solved: After constant folding and other transformations,
+# some instructions compute values that nobody reads. For example:
+#   t0 = 2        ← dead (nobody reads t0 after folding)
+#   t1 = 3        ← dead
+#   t2 = 5        ← this replaced t0 + t1
+#   x = t2        ← only this and t2 are live
+#
+# How it works (fixpoint iteration):
+# 1. Collect the "used" set: all registers that appear as src1 or src2
+#    in any instruction.
+# 2. Walk through instructions. Remove an instruction if:
+#    a) It has no side effects (not PRINT, CALL, BRANCH, LABEL, etc.)
+#    b) Its destination is a temporary (starts with "t")
+#    c) Its destination is NOT in the used set
+# 3. Repeat until no more instructions are removed (fixpoint).
+#    Removing one instruction may make another instruction's result
+#    unused, so we iterate until stable.
+#
+#   Iteration 1:              Iteration 2:          Iteration 3:
+#   t0 = 1                    t0 = 1                (stable — done)
+#   t1 = t0   ← reads t0     t1 = t0  ← dead!
+#   t2 = t1   ← reads t1     (removed)
+#   t3 = 42   ← dead!                               Final result:
+#   x = t2    ← reads t2     x = t0                 t0 = 1
+#   (remove t3)               (no more dead)         x  = t0
+#
+#   used = {t0,t1,t2,x}      used = {t0,x}
+#   t3 not in used → remove   t1 not in used → remove
+#
+# Why fixpoint: Consider a chain t0 = 1; t1 = t0; t2 = t1. If t2 is
+# dead, pass 1 removes it. Now t1 is dead, pass 2 removes it. Now t0
+# is dead, pass 3 removes it. Each iteration peels one layer.
+#
+# Complexity: O(n * d) where d is the max chain depth of dead values.
+# In practice, 2–3 iterations suffice.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import sys, os
 
