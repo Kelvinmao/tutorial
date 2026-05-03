@@ -6,6 +6,60 @@ Usage:
     python memory_planner.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHMS: Liveness Analysis + Greedy Buffer Sharing
+#
+# Historical context: Memory planning is critical for edge/mobile AI
+# where RAM is scarce (e.g., 256KB on microcontrollers). TFLite, ONNX
+# Runtime, and TVM all implement memory planners. The core idea comes
+# from register allocation in traditional compilers — reuse the same
+# physical storage for different logical values whose lifetimes don't
+# overlap.
+#
+# Problem solved: A CNN with 9 layers might allocate 9 separate buffers
+# for intermediate activations. But many of these are short-lived: once
+# Conv2's input is consumed, that buffer is never read again. If we
+# track lifetimes, we can reuse the same physical memory for multiple
+# logical buffers, reducing total memory from ~150MB to ~50MB.
+#
+# ALGORITHM 1 — Liveness Analysis:
+# - For each buffer, determine its "birth" (when the op that produces
+#   it runs) and "death" (the last time step any op reads it).
+# - Walk the operation list sequentially:
+#   a) An output buffer is "born" at time step t.
+#   b) An input buffer's death is updated to max(death, t).
+# - After the scan, each buffer has a [birth, death] interval.
+#
+#   Operation sequence:          Buffer lifetimes (Gantt chart):
+#
+#   t=0: out0 = Conv(input)      input:  ███████████████
+#   t=1: out1 = ReLU(out0)       out0:   ─███───────────  born t=0, dies t=1
+#   t=2: out2 = Conv(out1)       out1:   ──███──────────  born t=1, dies t=2
+#   t=3: out3 = ReLU(out2)       out2:   ───███─────────  born t=2, dies t=3
+#   t=4: out4 = Pool(out3)       out3:   ────███────────  born t=3, dies t=4
+#                                out4:   ─────██████████  born t=4, lives on
+#                                         0 1 2 3 4 5 ...  time →
+#
+#   Observation: out0 and out2 never overlap → can share memory!
+#
+# ALGORITHM 2 — Greedy Buffer Sharing:
+# - Sort buffers by birth time (earliest first).
+# - Maintain a pool of physical buffers, each with size and
+#   "available_after" (the death time of the last logical buffer
+#   assigned to it).
+# - For each logical buffer:
+#   a) Search the pool for a physical buffer that:
+#      - Is available (available_after < birth)
+#      - Is large enough (size >= needed)
+#      - Is the smallest among candidates (best-fit heuristic)
+#   b) If found, reuse it. Update available_after = death.
+#   c) If not found, allocate a new physical buffer.
+# - The result is a mapping: logical buffer → physical buffer.
+#
+# This is analogous to register allocation via linear scan, but for
+# multi-kilobyte tensor buffers instead of CPU registers.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from rich.console import Console

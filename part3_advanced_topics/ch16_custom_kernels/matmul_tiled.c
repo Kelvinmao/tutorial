@@ -1,6 +1,45 @@
 /*
  * Chapter 16 — Tiled (cache-blocked) matrix multiply.
  * Compile: gcc -O2 -o matmul_tiled matmul_tiled.c -lm
+ *
+ * ALGORITHM: Cache-Blocked (Tiled) Matrix Multiply
+ *
+ * Historical context: Cache blocking was a key technique in ATLAS
+ * (1998, Whaley & Dongarra), which auto-tuned tile sizes to match
+ * the CPU's cache hierarchy. Modern BLAS libraries (OpenBLAS, MKL)
+ * use multi-level tiling with hand-tuned micro-kernels.
+ *
+ * Problem solved: The naive version (matmul_naive.c) accesses B in
+ * column order, causing a cache miss per element. Tiling restructures
+ * the loops so that a TILE×TILE sub-block of B stays in L1 cache
+ * while it's reused across rows of A.
+ *
+ * Implementation: Six nested loops:
+ *   ii, jj, kk: outer tile loops (stride by TILE)
+ *   i, j, k:    inner element loops (within tile bounds)
+ * The working set per tile is:
+ *   A_tile: TILE×TILE = 32×32 = 4KB
+ *   B_tile: TILE×TILE = 4KB
+ *   C_tile: TILE×TILE = 4KB
+ *   Total: 12KB → fits comfortably in 32KB L1 cache
+ *
+ * Edge handling: min(ii+TILE, M) clamps the inner bounds when the
+ * matrix dimensions aren't multiples of TILE.
+ *
+ *   Tiled memory access pattern:
+ *
+ *   Matrix B:                    Inner loops access a TILE×TILE block:
+ *   ┌─────────────────────┐
+ *   │ ████ │              │      B tile (32×32 = 4KB):
+ *   │ ████ │              │      [b00 b01 ... b31]  ← all 32 used!
+ *   │ ████ │              │      [b32 b33 ... b63]  ← all 32 used!
+ *   │ ████ │              │      ...
+ *   │      │              │      Cache utilization: 32/16 = 2 lines,
+ *   │      │              │      both fully used = 100% utilization
+ *   └─────────────────────┘
+ *
+ *   Tile reuse: same B tile is accessed TILE times (once per A row
+ *   in the tile), so each cache line is reused 32× instead of 1×.
  */
 #include <stdio.h>
 #include <stdlib.h>

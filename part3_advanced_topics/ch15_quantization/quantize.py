@@ -6,6 +6,58 @@ Usage:
     python quantize.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: INT8 Quantization (Symmetric + Asymmetric)
+#
+# Historical context: Quantization for neural networks was popularized
+# by Jacob et al. (Google, 2018, "Quantization and Training of Neural
+# Networks for Efficient Integer-Arithmetic-Only Inference"). It enables
+# running models on edge devices (phones, microcontrollers) with limited
+# compute and memory. TensorRT, TFLite, and ONNX Runtime all support it.
+#
+# Problem solved: Neural network weights and activations are stored as
+# 32-bit floats (4 bytes each). INT8 quantization reduces this to 1 byte,
+# giving 4× compression and enabling faster integer arithmetic.
+#
+# ALGORITHM 1 — Symmetric Quantization:
+#   scale = max(|x|) / 127
+#   x_q = clamp(round(x / scale), -128, 127)  → int8
+#   x_deq = x_q * scale                        → float32
+#
+# Key property: zero maps to zero (zero_point = 0). Simple but wastes
+# range when the data isn't centered around zero.
+#
+#   Float range:    [-2.0 ......... 0 ......... +2.0]
+#   Symmetric INT8: [-128 ........ 0 ........ +127]
+#   scale = 2.0/127 = 0.0157
+#
+#   float:  -1.5  →  round(-1.5/0.0157) = round(-95.5) = -96  → int8
+#   deq:    -96 * 0.0157 = -1.507  (error: 0.007)
+#
+# ALGORITHM 2 — Asymmetric Quantization:
+#   scale = (x_max - x_min) / 255
+#   zero_point = round(-x_min / scale)
+#   x_q = clamp(round(x / scale + zero_point), 0, 255)  → uint8
+#   x_deq = (x_q - zero_point) * scale                   → float32
+#
+# Key property: Uses the full [0, 255] range even if x_min ≠ -x_max.
+# Better accuracy for ReLU outputs (which are all ≥0).
+#
+#   ReLU output:     [0.0 .................. +6.0]
+#   Asymmetric:      [0 .................... 255]
+#   scale = 6.0/255 = 0.0235,  zero_point = 0
+#
+#   vs Symmetric:    [-128 ... 0 .......... 127]
+#   scale = 6.0/127 = 0.0472   (2× coarser! half range wasted)
+#
+# Quantized matmul: C_float = (A_q @ B_q) * (scale_a * scale_b)
+# The integer matmul uses int32 accumulation to avoid overflow,
+# then rescales the result to float32.
+#
+# Tradeoff: 4× smaller, ~2× faster inference, but some accuracy loss
+# (typically <1% top-1 accuracy on ImageNet with proper calibration).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import numpy as np
 from rich.console import Console

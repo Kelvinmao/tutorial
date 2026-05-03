@@ -1,6 +1,36 @@
 /*
  * Chapter 16 — Naive matrix multiply (baseline).
  * Compile: gcc -O2 -o matmul_naive matmul_naive.c -lm
+ *
+ * ALGORITHM: Naive Triple-Nested Loop Matrix Multiply (ijk order)
+ *
+ * Historical context: This is the textbook O(n³) matrix multiply from
+ * every linear algebra course. It's correct but has terrible cache
+ * performance: the inner loop scans column j of B, but B is stored
+ * row-major, so each B[k*N+j] access hits a different cache line.
+ * For large N, every B access is a cache miss.
+ *
+ * Problem: Serves as the baseline to show how much tiling (ch16
+ * matmul_tiled.c) and compiler optimizations (gcc -O2) can help.
+ *
+ * Implementation: Three nested loops (i, j, k) with row-major indexing.
+ * A[i*K+k] is sequential (good cache behavior).
+ * B[k*N+j] is strided by N (poor cache behavior).
+ * C[i*N+j] is a single element (good, stays in register).
+ *
+ *   Memory access pattern for B (row-major storage):
+ *
+ *   B in memory: [b00 b01 b02 b03 | b10 b11 b12 b13 | ...]
+ *                 ^^^              ^^^              stride = N
+ *                 k=0              k=1
+ *
+ *   Inner loop (k): accesses B[0*N+j], B[1*N+j], B[2*N+j], ...
+ *   Each access jumps N elements (N*4 bytes) — different cache line!
+ *
+ *   Cache line (64 bytes = 16 floats):
+ *   [b00 b01 b02 ... b15]  ← only b00 used, 15 elements wasted
+ *   [b16 b17 b18 ... b31]  ← only b16 used, 15 elements wasted
+ *                              = 1/16 cache utilization!
  */
 #include <stdio.h>
 #include <stdlib.h>

@@ -7,6 +7,64 @@ Usage:
     python calibration.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Quantization Calibration (Scale Selection)
+#
+# Historical context: NVIDIA introduced calibration as part of TensorRT
+# (2017). The key insight: using max(|x|) for the quantization scale
+# is suboptimal because outliers waste the limited integer range. Better
+# methods use the actual data distribution to pick a scale that minimizes
+# quantization error for the typical values.
+#
+# Problem solved: The quantization scale determines how floating-point
+# values map to integers. A bad scale either clips too many values
+# (losing large activations) or wastes resolution (too coarse for
+# small values). Calibration finds the sweet spot using real data.
+#
+# Three calibration methods:
+#
+# 1. MinMax (simplest):
+#    scale = max(|x|) / 127 over all calibration batches.
+#    Pro: no clipping. Con: a single outlier wastes the entire range.
+#
+# 2. Percentile (99.9%):
+#    scale = percentile(|x|, 99.9) / 127
+#    Clips the top 0.1% as outliers. Pro: robust to outliers.
+#    Con: fixed percentile may not be optimal.
+#
+# 3. MSE-optimal (best accuracy):
+#    Search over candidate clip values and pick the one that minimizes
+#    mean squared error between original and dequantized values.
+#
+#   Data distribution with outlier:
+#
+#   Freq
+#    │██
+#    │████                            MinMax clips here
+#    │██████                                  │
+#    │████████                                ▼
+#    │████████████                   •      │
+#    └───────────────────────────────► value
+#                       ▲              outlier
+#                 Percentile clips here
+#                 (uses 99.9% of range,
+#                  ignores outlier)
+#
+#   MSE-optimal: tries 100 clip values, picks the one
+#   that minimizes ∑(x - dequant(quant(x)))²
+#    Algorithm:
+#      for clip_val in [max*1/100, max*2/100, ..., max]:
+#        quantize with scale = clip_val / 127
+#        compute MSE between original and dequantized
+#      return scale with lowest MSE
+#    Pro: directly minimizes reconstruction error.
+#    Con: slower (100 evaluations per tensor).
+#
+# In practice, TensorRT uses KL-divergence calibration (similar to MSE
+# but measures distribution distance), and INT8 calibration is run once
+# on a representative dataset before deployment.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import numpy as np
 from rich.console import Console

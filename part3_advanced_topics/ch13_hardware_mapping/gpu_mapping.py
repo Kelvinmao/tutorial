@@ -8,6 +8,53 @@ Usage:
     python gpu_mapping.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: GPU Thread/Block Mapping (CUDA Execution Model Simulation)
+#
+# Historical context: NVIDIA's CUDA (2007) introduced a hierarchical
+# parallelism model: Grid → Blocks → Threads. Each thread computes one
+# or a few output elements. AI compilers (TVM, Triton, XLA) must map
+# loop iterations to this hierarchy. Understanding this mapping is
+# essential for writing efficient GPU kernels.
+#
+# Problem solved: A CPU loop "for i, for j" is sequential. On a GPU,
+# we need to assign each (i,j) output element to a specific thread in
+# a specific block. The mapping determines memory access patterns,
+# occupancy, and ultimately performance.
+#
+# How the CUDA execution model works:
+# 1. GRID: The entire computation is divided into a 2D grid of blocks.
+#    Grid dimensions: (ceil(M/block_y), ceil(N/block_x))
+#
+# 2. BLOCK: Each block is a 2D array of threads.
+#    Block dimensions: (block_y, block_x) — typically 16×16 or 32×32.
+#    All threads in a block share L1/shared memory and can synchronize.
+#
+# 3. THREAD: Each thread computes one element of the output matrix:
+#    row = blockIdx.y * blockDim.y + threadIdx.y
+#    col = blockIdx.x * blockDim.x + threadIdx.x
+#    C[row, col] = sum_k(A[row, k] * B[k, col])
+#
+#   Output matrix C (8×8) with block_size = 4×4:
+#
+#   ┌───────────┬───────────┐
+#   │ Block(0,0)│ Block(0,1)│    Grid: 2×2 blocks
+#   │ 4×4 threads│ 4×4 threads│
+#   │ C[0..3,   │ C[0..3,   │    Each block has 16 threads
+#   │   0..3]   │   4..7]   │    Total: 64 threads for 64 elements
+#   ├───────────┼───────────┤
+#   │ Block(1,0)│ Block(1,1)│    Thread (1,2) in Block(0,0):
+#   │ C[4..7,   │ C[4..7,   │      row = 0*4 + 1 = 1
+#   │   0..3]   │   4..7]   │      col = 0*4 + 2 = 2
+#   └───────────┴───────────┘      → computes C[1,2]
+#
+# This simulation maps the CPU loops to (block, thread) indices and
+# produces heat maps showing which block/thread handles each output
+# element. Real GPU kernels use shared memory tiling to reduce global
+# memory access (combining the tiling concept from ch11 with the
+# GPU mapping here).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import numpy as np
 from rich.console import Console

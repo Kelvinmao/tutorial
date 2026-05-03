@@ -7,6 +7,54 @@ Usage:
     python inplace_mutation.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: In-Place Mutation Detection
+#
+# Historical context: In-place operations are a key optimization in
+# PyTorch (the trailing underscore convention: relu_(), add_()).
+# TVM, TensorRT, and ONNX Runtime detect safe in-place opportunities
+# automatically. The insight: element-wise ops like ReLU, sigmoid, and
+# scalar multiply produce output of the same shape as input. If nobody
+# else needs the input, we can write the output directly into the input
+# buffer, saving a memory allocation.
+#
+# Problem solved: Every tensor allocation has cost:
+# - malloc/free overhead
+# - Memory bus bandwidth to write the new buffer
+# - Cache pollution from the extra buffer
+# If ReLU can overwrite its input, we save one full-tensor allocation.
+# For a 64-channel, 56×56 activation map, that's ~800KB per op.
+#
+# How it works:
+# 1. Build a consumer map: for each buffer, list all ops that read it.
+# 2. For each operation:
+#    a) Check if the op type is in INPLACE_SAFE_OPS (element-wise ops
+#       that produce output of the same shape as their first input).
+#    b) Check if the first input's last consumer is the current op
+#       (i.e., no later op will read this buffer).
+#    c) If both conditions hold, this op can overwrite its input.
+# 3. apply_inplace() creates an alias map: output → input, meaning
+#    the output should use the same physical buffer as the input.
+#
+#   Without in-place:                With in-place:
+#
+#   buf_conv ┌───────┐ buf_relu       buf_conv ┌───────┐ buf_conv
+#   (alloc) ─►│ ReLU  │─► (alloc)       (alloc) ─►│ ReLU  │─► (reuse!)
+#            └───────┘                          └───────┘
+#   2 buffers allocated                  1 buffer (overwritten in-place)
+#
+#   Conditions for safety:
+#   ✔ ReLU is element-wise (same shape in/out)
+#   ✔ buf_conv's last consumer is this ReLU (nobody reads it later)
+#   ✘ If another op later reads buf_conv, in-place is UNSAFE
+#
+# Safety conditions:
+# - The op must be element-wise (same shape in/out)
+# - The input must not be read by any later op (alias safety)
+# - In a real compiler, also check that the buffer isn't an external
+#   input (user might still hold a reference to it)
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass
 from rich.console import Console

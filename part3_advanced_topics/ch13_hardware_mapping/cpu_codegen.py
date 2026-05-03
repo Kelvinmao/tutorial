@@ -6,6 +6,58 @@ Usage:
     python cpu_codegen.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: CPU Code Generation (Loop Nest → C Code Emission)
+#
+# Historical context: Code generation is the final compiler phase,
+# translating the optimized IR into executable code. TVM generates C
+# code for CPU targets, which is then compiled by GCC/Clang. This
+# approach leverages decades of C compiler optimization and avoids
+# the complexity of directly emitting machine code.
+#
+# Problem solved: We have an optimized loop nest (from ch10-11) and
+# need to turn it into something that runs on a real CPU. Generating
+# C code is practical because:
+# 1. C compilers (GCC, Clang) handle register allocation, instruction
+#    scheduling, and SIMD auto-vectorization.
+# 2. C is portable across architectures.
+# 3. The generated code is readable and debuggable.
+#
+# How it works:
+# 1. gen_matmul_c() generates a complete C program as a string:
+#    - Allocates matrices A, B, C with malloc/calloc
+#    - Initializes A, B with random values
+#    - Emits either naive (ijk) or tiled (blocked) loop nests
+#    - Times the computation with clock_gettime
+#    - Computes and prints GFLOPS
+#
+#   Loop nest → C code emission:
+#
+#   IR loop nest:                    Generated C code:
+#
+#   for i in 0..M (spatial)          for (int i=0; i<M; i++) {
+#     for j in 0..N (spatial)          for (int j=0; j<N; j++) {
+#       C[i][j] = 0  (init)              C[i*N+j] = 0.0;
+#       for k in 0..K (reduce)           for (int k=0; k<K; k++) {
+#         C[i][j] += A*B                   C[i*N+j] += A[i*K+k]
+#                                                     * B[k*N+j];
+#                                        }
+#                                      }
+#                                    }
+#
+#   Tiled variant adds 3 outer loops (ii,jj,kk) with stride=tile_size
+#   and clamps inner bounds: min(ii+tile, M)
+#
+# 2. compile_and_run() writes the C code to a temp file, invokes
+#    gcc -O2, runs the binary, and captures stdout.
+#
+# 3. The tiled version uses 6 nested loops (ii, jj, kk, i, j, k)
+#    with bounds clamping (min(ii+tile, M)) to handle edge tiles.
+#
+# This is a simplified version of what TVM, Halide, and XLA do when
+# targeting CPU backends.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import subprocess
 import tempfile

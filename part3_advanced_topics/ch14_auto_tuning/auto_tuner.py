@@ -6,6 +6,69 @@ Usage:
     python auto_tuner.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Evolutionary Search (Genetic Algorithm) for Auto-Tuning
+#
+# Historical context: Genetic algorithms were introduced by Holland (1975).
+# Their application to compiler optimization was explored by Cooper et al.
+# (1999, "Optimizing for Reduced Code Space Using Genetic Algorithms").
+# TVM's AutoTVM uses simulated annealing and XGBoost-guided search;
+# Ansor uses beam search. The evolutionary approach here is simple and
+# effective for the search space sizes encountered in practice.
+#
+# Problem solved: The search space has ~4,000 configurations (ch14
+# search_space.py). Exhaustive search works but is slow for larger
+# spaces. We need a smarter search that converges to good solutions
+# in fewer evaluations.
+#
+# How it works (standard evolutionary/genetic algorithm):
+#
+# 1. INITIALIZATION: Generate a random population of `pop_size`
+#    configurations by sampling the search space.
+#
+# 2. EVALUATION: Score each configuration using the cost model.
+#    Lower cost = better fitness.
+#
+# 3. SELECTION: Sort by fitness. Keep the top 50% as survivors
+#    (elitism — the best solutions always survive).
+#
+# 4. BREEDING: Fill the remaining slots by selecting pairs of
+#    survivors and combining them:
+#    a) CROSSOVER: For each parameter, randomly pick the value
+#       from parent A or parent B (uniform crossover).
+#    b) MUTATION: With probability `mutation_rate`, randomly
+#       replace one parameter with a new random value.
+#
+#   Generation 0 (random):        Generation N (converged):
+#
+#   Cost
+#   1000 │██                          │
+#    800 │████                        │
+#    600 │██████████                  │
+#    400 │████████                    │
+#    200 │████                        │████
+#    100 │██                          │████████████████████
+#        └────────────configs     └────────────configs
+#
+#   Crossover:   Parent A: {tile_m:32, tile_n:16}
+#                Parent B: {tile_m:8,  tile_n:64}
+#                Child:    {tile_m:32, tile_n:64} (mix of both)
+#
+#   Mutation:    Child: {tile_m:32, tile_n:64}
+#                       → {tile_m:16, tile_n:64} (tile_m mutated)
+#
+# 5. REPEAT for `generations` generations. Track the best-ever
+#    configuration and convergence history.
+#
+# Why it works: Good configurations tend to share good parameter
+# values (e.g., tile_m=32 is often good). Crossover combines good
+# values from different parents. Mutation prevents getting stuck
+# in local optima. Elitism ensures we never lose the best solution.
+#
+# Complexity: O(generations × pop_size) cost model evaluations.
+# Typically ~1,000 evaluations find near-optimal solutions.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import random
 import json

@@ -3,6 +3,54 @@
 Chapter 14 — Search space: define tunable optimization parameters.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# CONCEPT: Search Space Definition for Auto-Tuning
+#
+# Historical context: The idea of defining a "search space" of compiler
+# knobs and automatically searching for the best combination was
+# pioneered by ATLAS (1998) for BLAS, and later by TVM's AutoTVM (2018)
+# and Ansor (2020) for tensor programs. The observation: optimal tile
+# sizes, unroll factors, and vectorization widths depend on the specific
+# hardware (cache sizes, SIMD width, core count) and can't be determined
+# analytically — they must be found empirically.
+#
+# Problem solved: For a 128×128 matmul, there are many possible
+# configurations:
+#   tile_m ∈ {1,2,4,8,16,32,64}    → 7 choices
+#   tile_n ∈ {1,2,4,8,16,32,64}    → 7 choices
+#   tile_k ∈ {1,2,4,8,16,32,64}    → 7 choices
+#   unroll_factor ∈ {1,2,4,8}      → 4 choices
+#   vectorize_width ∈ {1,4,8}      → 3 choices
+#   Total: 7×7×7×4×3 = 4,116 configurations
+#
+# Exhaustive search is feasible for small spaces but explodes for real
+# workloads. Hence the need for smart search algorithms (ch14 auto_tuner).
+#
+# How it works:
+# - TunableParam: a named parameter with a list of discrete choices.
+# - SearchSpace: a collection of TunableParams.
+# - sample(): randomly pick one value for each parameter.
+# - size(): compute the total number of configurations (product of choices).
+#
+#   Search space for matmul:
+#
+#   Parameter        Choices            Count
+#   ┌───────────────┬─────────────────────┬─────┐
+#   │ tile_m        │ [1,2,4,8,16,32,64] │   7 │
+#   ├───────────────┼─────────────────────┼─────┤
+#   │ tile_n        │ [1,2,4,8,16,32,64] │   7 │
+#   ├───────────────┼─────────────────────┼─────┤
+#   │ tile_k        │ [1,2,4,8,16,32,64] │   7 │
+#   ├───────────────┼─────────────────────┼─────┤
+#   │ unroll_factor │ [1,2,4,8]          │   4 │
+#   ├───────────────┼─────────────────────┼─────┤
+#   │ vec_width     │ [1,4,8]            │   3 │
+#   └───────────────┴─────────────────────┴─────┘
+#                    Total: 7×7×7×4×3 = 4,116 configurations
+#
+#   One sample: {tile_m:32, tile_n:16, tile_k:8, unroll:4, vec:4}
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass
 import random

@@ -4,6 +4,59 @@ Chapter 14 — Simple analytical cost model for matrix multiply.
 Estimates execution time based on cache behavior and compute.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Analytical Cost Model for Guided Search
+#
+# Historical context: Cost models were introduced to avoid the expense
+# of actually running every configuration during auto-tuning. TVM uses
+# learned cost models (XGBoost, neural networks), but simpler analytical
+# models based on cache hierarchy and compute throughput are a good
+# starting point and are used by Halide's auto-scheduler.
+#
+# Problem solved: The auto-tuner needs to evaluate thousands of
+# configurations. Running each on real hardware takes seconds. An
+# analytical model estimates performance in microseconds, enabling
+# much larger search.
+#
+# How it works (three cost components):
+#
+# 1. COMPUTE COST: total FLOPs / effective throughput.
+#    - 2*M*N*K FLOPs for matmul (multiply + add per element)
+#    - Throughput scales with vectorization width (SIMD)
+#
+# 2. MEMORY COST: based on tile working set vs. cache capacity.
+#    - Working set = tile_A + tile_B + tile_C bytes
+#    - If working set fits in L1 (32KB): penalty = 1 (fast)
+#    - If fits in L2 (256KB): penalty = 3 (slower)
+#    - If exceeds L2: penalty = 20 (main memory, very slow)
+#    - Total memory cost = num_tiles × penalty × cache_line_loads
+#
+#   Config: tile_m=32, tile_n=32, tile_k=32
+#
+#   Working set = tile_A   + tile_B   + tile_C
+#               = 32×32×4 + 32×32×4 + 32×32×4
+#               = 4KB    + 4KB    + 4KB    = 12KB
+#
+#   L1 cache (32KB):  [########░░░░░░░░]  12KB < 32KB ✓
+#                      ^tile fits!       penalty = 1×
+#
+#   Config: tile_m=64, tile_n=64, tile_k=64
+#   Working set = 48KB
+#   L1 cache (32KB):  [################]  48KB > 32KB ✘
+#   L2 cache (256KB): [###░░░░░░░░░░░░░]  48KB < 256KB ✓
+#                                         penalty = 3×
+#
+# 3. LOOP OVERHEAD: proportional to num_tiles, reduced by unrolling.
+#    - More tiles = more loop control instructions
+#    - Higher unroll factor = less overhead per tile
+#
+# Total cost = compute_cycles + memory_cycles + loop_overhead
+#
+# This model is approximate but captures the key insight: tile size
+# controls the tradeoff between cache reuse (fewer memory stalls) and
+# loop overhead (more tiles = more overhead).
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import math
 

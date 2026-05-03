@@ -6,6 +6,34 @@ Usage:
     python benchmark.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PURPOSE: Automated Kernel Benchmarking
+#
+# This script automates the compile-and-measure workflow that validates
+# compiler optimizations against real hardware:
+# 1. Compile each C kernel with gcc -O2
+# 2. Run at multiple matrix sizes (128, 256, 512)
+# 3. Parse GFLOPS from stdout
+# 4. Compare naive vs tiled performance
+# 5. Generate visualizations
+#
+#   Workflow:
+#
+#   matmul_naive.c  ──gcc -O2──► ./matmul_naive 256 ──► "naive,256,0.05,0.34"
+#   matmul_tiled.c  ──gcc -O2──► ./matmul_tiled 256 ──► "tiled,256,0.01,1.68"
+#                                                            │
+#                                                            ▼
+#   GFLOPS comparison (bar chart):     Performance speedup:
+#   ┌────────────────────────┐
+#   │  naive: █▎         0.34│         tiled/naive = 1.68/0.34 = 4.9×
+#   │  tiled: █████▊     1.68│
+#   └────────────────────────┘
+#
+# This is the feedback loop that closes the auto-tuning cycle (ch14):
+# the cost model predicts performance, and the benchmark measures it.
+# Discrepancies between model and measurement guide cost model refinement.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 import subprocess
 import os

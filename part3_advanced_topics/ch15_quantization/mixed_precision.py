@@ -6,6 +6,59 @@ Usage:
     python mixed_precision.py
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ALGORITHM: Mixed Precision Assignment via Sensitivity Analysis
+#
+# Historical context: Mixed precision was popularized by Micikevicius
+# et al. (NVIDIA, 2018, "Mixed Precision Training") for training, and
+# Hawq (Dong et al., 2019) for inference. The insight: not all layers
+# are equally sensitive to quantization. Some (like the first and last
+# layers) lose significant accuracy when quantized, while most middle
+# layers are robust.
+#
+# Problem solved: Quantizing ALL layers to INT8 may cause unacceptable
+# accuracy loss. Keeping ALL layers at FP32 gives no speedup. Mixed
+# precision finds the optimal per-layer precision that maximizes
+# compression while keeping accuracy loss below a threshold.
+#
+# How it works:
+# 1. MEASURE SENSITIVITY: For each layer, compare FP32 output to
+#    quantized (INT8 + dequantized) output on random input.
+#    Sensitivity = mean(|y_fp32 - y_int8|) / mean(|y_fp32|)
+#    High sensitivity = quantization changes the output a lot.
+#
+# 2. ASSIGN PRECISION: Compare each layer's sensitivity to a threshold.
+#    - sensitivity > threshold → FP32 (keep full precision)
+#    - sensitivity ≤ threshold → INT8 (safe to quantize)
+#
+#   Layer sensitivity analysis:
+#
+#   Layer     Sensitivity  Decision
+#   ┌────────┬──────────────────────────────┬───────┐
+#   │ embed  │ ██████████████████  0.12   │ FP32  │  ← sensitive!
+#   ├────────┼──────────────────────────────┼───────┤
+#   │ attn_q │ █████              0.03   │ INT8  │
+#   ├────────┼──────────────────────────────┼───────┤
+#   │ ffn1   │ ████              0.02   │ INT8  │
+#   ├────────┼──────────────────────────────┼───────┤
+#   │ ffn2   │ ██████             0.04   │ INT8  │
+#   ├────────┼──────────────────────────────┼───────┤
+#   │ head   │ ███████████████████ 0.15   │ FP32  │  ← sensitive!
+#   └────────┴──────────────────────────────┴───────┘
+#                               threshold=0.05 ──▲
+#
+#   Result: 60% INT8 + 40% FP32 → ~3× compression, <0.5% accuracy loss
+#
+# 3. RESULT: A per-layer precision map:
+#    embed: FP32 (tiny weights, sensitive to quantization noise)
+#    attn_q: INT8 (moderate weights, robust)
+#    ffn1:   INT8 (large weights, robust)
+#    head:   FP32 (large weights, sensitive — final classifier)
+#
+# Typical result: 70-80% of layers can be INT8, giving ~3× compression
+# with <0.5% accuracy loss.
+# ═══════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
